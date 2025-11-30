@@ -1,2 +1,7 @@
-# Holding patterns for EGKK WEST
-# This file defines holding patterns and procedures
+// NAVAID;INBOUNDCRS;DIRECTION;TIME/DISTANCE;COLOR;
+
+MAY;260;L;1MIN;
+SFD;020;R;1MIN;
+BIG;190;L;1MIN;
+LAM;210;R;1MIN;
+DVR;290;L;1MIN;
