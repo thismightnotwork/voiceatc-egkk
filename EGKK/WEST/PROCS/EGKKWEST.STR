@@ -1,0 +1,6 @@
+# STAR Procedures for EGKK WEST
+# Format: airport;runway;procedure;waypoint;altitude;speed;
+EGKK;08L;BIG4A;BIG;6000;250;
+EGKK;08L;BIG4A;TIMBA;4000;220;
+EGKK;26R;LAM6A;LAM;7000;250;
+EGKK;26R;LAM6A;WILLO;5000;220;
