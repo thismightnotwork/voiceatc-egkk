@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ATC PTT Demo (Puter.js)</title>
+  <script src="https://js.puter.com/v2/"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 800px; margin: auto; }
+    h1 { font-size: 1.5rem; }
+    #ptt {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid #666;
+      background: #eee;
+    }
+    #ptt.recording {
+      background: #d9534f;
+      color: white;
+      border-color: #b52b27;
+    }
+    #status { margin-top: 0.5rem; color: #555; }
+    #you, #atc {
+      white-space: pre-wrap;
+      margin-top: 0.75rem;
+      padding: 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      min-height: 3rem;
+    }
+    #labels { margin-top: 1rem; display: flex; gap: 1rem; font-weight: 600; }
+    #labels span { flex: 1; }
+    #panels { display: flex; gap: 1rem; }
+    #panels > div { flex: 1; }
+  </style>
+</head>
+<body>
+  <h1>ATC Push‑to‑Talk Demo</h1>
+  <p>Hold the button, speak a basic call (e.g. departure, landing request), release to hear a CAA‑style ATC reply.</p>
+
+  <button id="ptt">Hold to Talk</button>
+  <div id="status"></div>
+
+  <div id="labels">
+    <span>You (pilot)</span>
+    <span>ATC reply</span>
+  </div>
+  <div id="panels">
+    <div id="you"></div>
+    <div id="atc"></div>
+  </div>
+
+  <script>
+    const pttBtn = document.getElementById('ptt');
+    const statusDiv = document.getElementById('status');
+    const youDiv = document.getElementById('you');
+    const atcDiv = document.getElementById('atc');
+
+    let mediaRecorder;
+    let chunks = [];
+
+    async function initMedia() {
+      if (mediaRecorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        mediaRecorder.onstop = onStopRecording;
+      } catch (err) {
+        statusDiv.textContent = 'Mic error: ' + err.message;
+      }
+    }
+
+    // Very simple intent -> canned CAA-style responses
+    function buildCaaReply(transcript) {
+      const text = transcript.toLowerCase();
+
+      // These are deliberately simplified stock lines; expand/adjust for realism.
+      if (text.includes('ready for departure') || text.includes('ready for takeoff')) {
+        return "G-ABCD, runway two seven, cleared for takeoff, surface wind two five zero degrees one zero knots.";
+      }
+
+      if (text.includes('request taxi') || text.includes('request taxi clearance') || text.includes('taxi to')) {
+        return "G-ABCD, taxi to holding point runway two seven via alpha, QNH one zero one three.";
+      }
+
+      if (text.includes('joining') || text.includes('request join') || text.includes('overhead join')) {
+        return "G-ABCD, join overhead at two thousand feet, report descending dead side runway two seven right hand circuit.";
+      }
+
+      if (text.includes('final') || text.includes('on final') || text.includes('landing')) {
+        return "G-ABCD, runway two seven, cleared to land, surface wind two four zero degrees one two knots.";
+      }
+
+      if (text.includes('downwind')) {
+        return "G-ABCD, report final runway two seven.";
+      }
+
+      if (text.includes('go around')) {
+        return "G-ABCD, roger go around, fly runway heading, climb to two thousand feet.";
+      }
+
+      // Default catch‑all
+      return "G-ABCD, roger, say again your request.";
+    }
+
+    async function speak(text) {
+      try {
+        const audio = await puter.ai.txt2speech(text, {
+          language: "en-GB"
+        });
+        await audio.play();
+      } catch (err) {
+        console.error(err);
+        statusDiv.textContent = 'TTS error: ' + err.message;
+      }
+    }
+
+    async function onStopRecording() {
+      statusDiv.textContent = 'Transcribing...';
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      chunks = [];
+
+      try {
+        const result = await puter.ai.speech2txt(blob);
+        const pilotText = result.text || result || '';
+        youDiv.textContent = pilotText || '(No speech recognised)';
+
+        const reply = pilotText ? buildCaaReply(pilotText) : "G-ABCD, no transmission received, say again.";
+        atcDiv.textContent = reply;
+
+        statusDiv.textContent = 'Playing ATC reply...';
+        await speak(reply);
+        statusDiv.textContent = 'Ready.';
+      } catch (err) {
+        console.error(err);
+        statusDiv.textContent = 'Transcription error: ' + err.message;
+      }
+    }
+
+    // PTT events
+    pttBtn.addEventListener('mousedown', async () => {
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add('recording');
+      statusDiv.textContent = 'Recording...';
+    });
+
+    pttBtn.addEventListener('mouseup', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+
+    pttBtn.addEventListener('mouseleave', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+
+    // Touch support
+    pttBtn.addEventListener('touchstart', async (e) => {
+      e.preventDefault();
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add('recording');
+      statusDiv.textContent = 'Recording...';
+    });
+
+    pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+  </script>
+</body>
+</html>
