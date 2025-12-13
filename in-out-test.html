@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ATC PTT Demo – Pilot Readback</title>
+  <title>ATC STT → AI → TTS (Puter.js)</title>
   <script src="https://js.puter.com/v2/"></script>
   <style>
-    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 800px; margin: auto; }
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 900px; margin: auto; }
     h1 { font-size: 1.5rem; }
     #ptt {
       padding: 0.75rem 1.5rem;
@@ -36,8 +36,8 @@
   </style>
 </head>
 <body>
-  <h1>ATC PTT – CAA‑style Pilot Readback</h1>
-  <p>You speak as ATC (e.g. “Golf Alpha Bravo Charlie Delta, runway two seven cleared for takeoff…”). The AI replies as the pilot.</p>
+  <h1>ATC Push‑to‑Talk – AI Pilot Reply</h1>
+  <p>You speak as ATC (e.g. “Golf Oscar Lima Foxtrot, runway two seven cleared for takeoff…”). The AI understands it and replies as the pilot, then speaks the reply.</p>
 
   <button id="ptt">Hold to Talk (ATC)</button>
   <div id="status"></div>
@@ -60,167 +60,131 @@
     let mediaRecorder;
     let chunks = [];
 
-    const NATO = {
-      a: "Alpha", b: "Bravo", c: "Charlie", d: "Delta", e: "Echo",
-      f: "Foxtrot", g: "Golf", h: "Hotel", i: "India", j: "Juliet",
-      k: "Kilo", l: "Lima", m: "Mike", n: "November", o: "Oscar",
-      p: "Papa", q: "Quebec", r: "Romeo", s: "Sierra", t: "Tango",
-      u: "Uniform", v: "Victor", w: "Whiskey", x: "X-ray", y: "Yankee", z: "Zulu"
-    };
-
-    function callsignToPhonetic(callsign) {
-      if (!callsign) return "";
-      // Strip G- prefix if present and spaces
-      const cs = callsign.replace(/[^A-Z0-9]/gi, "").toUpperCase();
-      let out = [];
-      for (const ch of cs) {
-        if (/[A-Z]/.test(ch)) {
-          out.push(NATO[ch.toLowerCase()] || ch);
-        } else {
-          out.push(ch); // digits as digits
-        }
-      }
-      return out.join(" ");
-    }
-
-    function extractCallsign(text) {
-      // Look for something like G-ABCD or GABCD or G XXXX
-      const m = text.toUpperCase().match(/\bG[- ]?[A-Z0-9]{2,5}\b/);
-      return m ? m[0].replace(" ", "-") : "G-ABCD";
-    }
-
-    function buildPilotReply(atcText) {
-      const lower = atcText.toLowerCase();
-      const callsign = extractCallsign(atcText);
-      const phon = callsignToPhonetic(callsign);
-
-      // Start with callsign as pilot would say it
-      let base = phon + ", ";
-
-      // Very simple intent mapping – expand as needed
-      if (lower.includes("cleared for takeoff") || lower.includes("cleared for departure")) {
-        return base + "cleared for takeoff runway two seven.";
-      }
-
-      if (lower.includes("taxi to") || lower.includes("taxi via") || lower.includes("taxi")) {
-        return base + "taxiing as cleared.";
-      }
-
-      if (lower.includes("cleared to land")) {
-        return base + "cleared to land runway two seven.";
-      }
-
-      if (lower.includes("report final")) {
-        return base + "will report final runway two seven.";
-      }
-
-      if (lower.includes("climb") || lower.includes("descend")) {
-        return base + "readback correct.";
-      }
-
-      // Default readback/acknowledge
-      return base + "roger, " + atcText;
-    }
-
     async function initMedia() {
       if (mediaRecorder) return;
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.ondataavailable = e => {
-          if (e.data && e.data.size > 0) chunks.push(e.data);
-        };
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
         mediaRecorder.onstop = onStopRecording;
       } catch (err) {
         statusDiv.textContent = 'Mic error: ' + err.message;
       }
     }
 
+    async function askPilotAI(atcText) {
+      const systemPrompt =
+        "You are the pilot in a UK CAA CAP 413 style RTF exchange. " +
+        "You receive ATC transmissions as text. " +
+        "Your job is to produce a SINGLE, realistic pilot readback. " +
+        "Rules:\n" +
+        "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
+        "- Identify the aircraft once per transmission using its callsign in the NATO phonetic alphabet.\n" +
+        "- Put the clearance or readback FIRST, and the callsign LAST. Example: 'cleared for takeoff runway two seven, Golf Oscar Lima Foxtrot.'\n" +
+        "- Be concise: only read back what is required (clearances, runway, level, QNH, squawk etc.).\n" +
+        "- Do NOT include any explanations or extra text, only the pilot’s spoken transmission.";
+
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "ATC transmission: \"" + atcText + "\"" }
+      ];
+
+      // Use a small, free model via Puter (gpt‑5‑nano in their OpenAI tutorial)
+      const resp = await puter.ai.chat(messages, {
+        model: "gpt-5-nano",
+        stream: false
+      });
+
+      // resp may be a string or an object depending on provider; handle both
+      if (typeof resp === "string") return resp;
+      if (resp?.message?.content) return resp.message.content;
+      if (resp?.choices?.[0]?.message?.content) return resp.choices[0].message.content;
+
+      return "say again, please.";
+    }
+
     async function speak(text) {
-      try {
-        const audio = await puter.ai.txt2speech(text, {
-          language: "en-GB"
-        });
-        await audio.play();
-      } catch (err) {
-        console.error(err);
-        statusDiv.textContent = 'TTS error: ' + err.message;
-      }
+      // Free TTS through Puter; provider can be default or openai/polly per docs
+      const audio = await puter.ai.txt2speech(text, {
+        language: "en-GB"
+      });
+      await audio.play();
     }
 
     async function onStopRecording() {
-      statusDiv.textContent = 'Transcribing...';
-      const blob = new Blob(chunks, { type: 'audio/webm' });
+      statusDiv.textContent = "Transcribing...";
+      const blob = new Blob(chunks, { type: "audio/webm" });
       chunks = [];
 
       try {
         const result = await puter.ai.speech2txt(blob);
         const atcText = result.text || result || "";
-        youDiv.textContent = atcText || '(No speech recognised)';
+        youDiv.textContent = atcText || "(No speech recognised)";
 
         if (!atcText) {
-          const fallback = "Golf Alpha Bravo Charlie Delta, no transmission received, say again.";
+          const fallback = "no transmission received, say again.";
           pilotDiv.textContent = fallback;
           await speak(fallback);
-          statusDiv.textContent = 'Ready.';
+          statusDiv.textContent = "Ready.";
           return;
         }
 
-        const reply = buildPilotReply(atcText);
-        pilotDiv.textContent = reply;
+        statusDiv.textContent = "Asking AI to generate pilot reply...";
+        const pilotText = await askPilotAI(atcText);
+        pilotDiv.textContent = pilotText;
 
-        statusDiv.textContent = 'Pilot replying...';
-        await speak(reply);
-        statusDiv.textContent = 'Ready.';
+        statusDiv.textContent = "Speaking pilot reply...";
+        await speak(pilotText);
+        statusDiv.textContent = "Ready.";
       } catch (err) {
         console.error(err);
-        statusDiv.textContent = 'Transcription error: ' + err.message;
+        statusDiv.textContent = "Error: " + err.message;
       }
     }
 
     // PTT handlers
-    pttBtn.addEventListener('mousedown', async () => {
+    pttBtn.addEventListener("mousedown", async () => {
       await initMedia();
       if (!mediaRecorder) return;
       chunks = [];
       mediaRecorder.start();
-      pttBtn.classList.add('recording');
-      statusDiv.textContent = 'Recording ATC...';
+      pttBtn.classList.add("recording");
+      statusDiv.textContent = "Recording ATC...";
     });
 
-    pttBtn.addEventListener('mouseup', () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
+    pttBtn.addEventListener("mouseup", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
-        pttBtn.classList.remove('recording');
-        statusDiv.textContent = 'Processing...';
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
       }
     });
 
-    pttBtn.addEventListener('mouseleave', () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
+    pttBtn.addEventListener("mouseleave", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
-        pttBtn.classList.remove('recording');
-        statusDiv.textContent = 'Processing...';
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
       }
     });
 
-    // Touch
-    pttBtn.addEventListener('touchstart', async (e) => {
+    // Touch support
+    pttBtn.addEventListener("touchstart", async (e) => {
       e.preventDefault();
       await initMedia();
       if (!mediaRecorder) return;
       chunks = [];
       mediaRecorder.start();
-      pttBtn.classList.add('recording');
-      statusDiv.textContent = 'Recording ATC...';
+      pttBtn.classList.add("recording");
+      statusDiv.textContent = "Recording ATC...";
     });
 
-    pttBtn.addEventListener('touchend', (e) => {
+    pttBtn.addEventListener("touchend", (e) => {
       e.preventDefault();
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
         mediaRecorder.stop();
-        pttBtn.classList.remove('recording');
-        statusDiv.textContent = 'Processing...';
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
       }
     });
   </script>
