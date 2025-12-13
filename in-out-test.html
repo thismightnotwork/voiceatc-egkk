@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>ATC PTT Demo (Puter.js)</title>
+  <title>ATC PTT Demo – Pilot Readback</title>
   <script src="https://js.puter.com/v2/"></script>
   <style>
     body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 800px; margin: auto; }
@@ -21,44 +21,106 @@
       border-color: #b52b27;
     }
     #status { margin-top: 0.5rem; color: #555; }
-    #you, #atc {
+    #labels { margin-top: 1rem; display: flex; gap: 1rem; font-weight: 600; }
+    #labels span { flex: 1; }
+    #panels { display: flex; gap: 1rem; }
+    #panels > div {
+      flex: 1;
       white-space: pre-wrap;
-      margin-top: 0.75rem;
+      margin-top: 0.25rem;
       padding: 0.75rem;
       border: 1px solid #ccc;
       border-radius: 4px;
       min-height: 3rem;
     }
-    #labels { margin-top: 1rem; display: flex; gap: 1rem; font-weight: 600; }
-    #labels span { flex: 1; }
-    #panels { display: flex; gap: 1rem; }
-    #panels > div { flex: 1; }
   </style>
 </head>
 <body>
-  <h1>ATC Push‑to‑Talk Demo</h1>
-  <p>Hold the button, speak a basic call (e.g. departure, landing request), release to hear a CAA‑style ATC reply.</p>
+  <h1>ATC PTT – CAA‑style Pilot Readback</h1>
+  <p>You speak as ATC (e.g. “Golf Alpha Bravo Charlie Delta, runway two seven cleared for takeoff…”). The AI replies as the pilot.</p>
 
-  <button id="ptt">Hold to Talk</button>
+  <button id="ptt">Hold to Talk (ATC)</button>
   <div id="status"></div>
 
   <div id="labels">
-    <span>You (pilot)</span>
-    <span>ATC reply</span>
+    <span>ATC (you)</span>
+    <span>Pilot (AI)</span>
   </div>
   <div id="panels">
     <div id="you"></div>
-    <div id="atc"></div>
+    <div id="pilot"></div>
   </div>
 
   <script>
     const pttBtn = document.getElementById('ptt');
     const statusDiv = document.getElementById('status');
     const youDiv = document.getElementById('you');
-    const atcDiv = document.getElementById('atc');
+    const pilotDiv = document.getElementById('pilot');
 
     let mediaRecorder;
     let chunks = [];
+
+    const NATO = {
+      a: "Alpha", b: "Bravo", c: "Charlie", d: "Delta", e: "Echo",
+      f: "Foxtrot", g: "Golf", h: "Hotel", i: "India", j: "Juliet",
+      k: "Kilo", l: "Lima", m: "Mike", n: "November", o: "Oscar",
+      p: "Papa", q: "Quebec", r: "Romeo", s: "Sierra", t: "Tango",
+      u: "Uniform", v: "Victor", w: "Whiskey", x: "X-ray", y: "Yankee", z: "Zulu"
+    };
+
+    function callsignToPhonetic(callsign) {
+      if (!callsign) return "";
+      // Strip G- prefix if present and spaces
+      const cs = callsign.replace(/[^A-Z0-9]/gi, "").toUpperCase();
+      let out = [];
+      for (const ch of cs) {
+        if (/[A-Z]/.test(ch)) {
+          out.push(NATO[ch.toLowerCase()] || ch);
+        } else {
+          out.push(ch); // digits as digits
+        }
+      }
+      return out.join(" ");
+    }
+
+    function extractCallsign(text) {
+      // Look for something like G-ABCD or GABCD or G XXXX
+      const m = text.toUpperCase().match(/\bG[- ]?[A-Z0-9]{2,5}\b/);
+      return m ? m[0].replace(" ", "-") : "G-ABCD";
+    }
+
+    function buildPilotReply(atcText) {
+      const lower = atcText.toLowerCase();
+      const callsign = extractCallsign(atcText);
+      const phon = callsignToPhonetic(callsign);
+
+      // Start with callsign as pilot would say it
+      let base = phon + ", ";
+
+      // Very simple intent mapping – expand as needed
+      if (lower.includes("cleared for takeoff") || lower.includes("cleared for departure")) {
+        return base + "cleared for takeoff runway two seven.";
+      }
+
+      if (lower.includes("taxi to") || lower.includes("taxi via") || lower.includes("taxi")) {
+        return base + "taxiing as cleared.";
+      }
+
+      if (lower.includes("cleared to land")) {
+        return base + "cleared to land runway two seven.";
+      }
+
+      if (lower.includes("report final")) {
+        return base + "will report final runway two seven.";
+      }
+
+      if (lower.includes("climb") || lower.includes("descend")) {
+        return base + "readback correct.";
+      }
+
+      // Default readback/acknowledge
+      return base + "roger, " + atcText;
+    }
 
     async function initMedia() {
       if (mediaRecorder) return;
@@ -72,39 +134,6 @@
       } catch (err) {
         statusDiv.textContent = 'Mic error: ' + err.message;
       }
-    }
-
-    // Very simple intent -> canned CAA-style responses
-    function buildCaaReply(transcript) {
-      const text = transcript.toLowerCase();
-
-      // These are deliberately simplified stock lines; expand/adjust for realism.
-      if (text.includes('ready for departure') || text.includes('ready for takeoff')) {
-        return "G-ABCD, runway two seven, cleared for takeoff, surface wind two five zero degrees one zero knots.";
-      }
-
-      if (text.includes('request taxi') || text.includes('request taxi clearance') || text.includes('taxi to')) {
-        return "G-ABCD, taxi to holding point runway two seven via alpha, QNH one zero one three.";
-      }
-
-      if (text.includes('joining') || text.includes('request join') || text.includes('overhead join')) {
-        return "G-ABCD, join overhead at two thousand feet, report descending dead side runway two seven right hand circuit.";
-      }
-
-      if (text.includes('final') || text.includes('on final') || text.includes('landing')) {
-        return "G-ABCD, runway two seven, cleared to land, surface wind two four zero degrees one two knots.";
-      }
-
-      if (text.includes('downwind')) {
-        return "G-ABCD, report final runway two seven.";
-      }
-
-      if (text.includes('go around')) {
-        return "G-ABCD, roger go around, fly runway heading, climb to two thousand feet.";
-      }
-
-      // Default catch‑all
-      return "G-ABCD, roger, say again your request.";
     }
 
     async function speak(text) {
@@ -126,13 +155,21 @@
 
       try {
         const result = await puter.ai.speech2txt(blob);
-        const pilotText = result.text || result || '';
-        youDiv.textContent = pilotText || '(No speech recognised)';
+        const atcText = result.text || result || "";
+        youDiv.textContent = atcText || '(No speech recognised)';
 
-        const reply = pilotText ? buildCaaReply(pilotText) : "G-ABCD, no transmission received, say again.";
-        atcDiv.textContent = reply;
+        if (!atcText) {
+          const fallback = "Golf Alpha Bravo Charlie Delta, no transmission received, say again.";
+          pilotDiv.textContent = fallback;
+          await speak(fallback);
+          statusDiv.textContent = 'Ready.';
+          return;
+        }
 
-        statusDiv.textContent = 'Playing ATC reply...';
+        const reply = buildPilotReply(atcText);
+        pilotDiv.textContent = reply;
+
+        statusDiv.textContent = 'Pilot replying...';
         await speak(reply);
         statusDiv.textContent = 'Ready.';
       } catch (err) {
@@ -141,14 +178,14 @@
       }
     }
 
-    // PTT events
+    // PTT handlers
     pttBtn.addEventListener('mousedown', async () => {
       await initMedia();
       if (!mediaRecorder) return;
       chunks = [];
       mediaRecorder.start();
       pttBtn.classList.add('recording');
-      statusDiv.textContent = 'Recording...';
+      statusDiv.textContent = 'Recording ATC...';
     });
 
     pttBtn.addEventListener('mouseup', () => {
@@ -167,7 +204,7 @@
       }
     });
 
-    // Touch support
+    // Touch
     pttBtn.addEventListener('touchstart', async (e) => {
       e.preventDefault();
       await initMedia();
@@ -175,7 +212,7 @@
       chunks = [];
       mediaRecorder.start();
       pttBtn.classList.add('recording');
-      statusDiv.textContent = 'Recording...';
+      statusDiv.textContent = 'Recording ATC...';
     });
 
     pttBtn.addEventListener('touchend', (e) => {
