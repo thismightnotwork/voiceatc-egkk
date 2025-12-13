@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Puter.js PTT Transcriber</title>
+  <script src="https://js.puter.com/v2/"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 700px; margin: auto; }
+    h1 { font-size: 1.5rem; }
+    #ptt {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid #666;
+      background: #eee;
+    }
+    #ptt.recording {
+      background: #d9534f;
+      color: white;
+      border-color: #b52b27;
+    }
+    #status { margin-top: 0.5rem; color: #555; }
+    #transcript {
+      white-space: pre-wrap;
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      min-height: 4rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Puter.js Push‑to‑Talk Transcriber</h1>
+
+  <button id="ptt">Hold to Talk</button>
+  <div id="status"></div>
+  <div id="transcript"></div>
+
+  <script>
+    const pttBtn = document.getElementById('ptt');
+    const statusDiv = document.getElementById('status');
+    const transcriptDiv = document.getElementById('transcript');
+
+    let mediaRecorder;
+    let chunks = [];
+
+    async function initMedia() {
+      if (mediaRecorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) {
+            chunks.push(e.data);
+          }
+        };
+        mediaRecorder.onstop = onStopRecording;
+      } catch (err) {
+        statusDiv.textContent = 'Mic error: ' + err.message;
+      }
+    }
+
+    async function onStopRecording() {
+      statusDiv.textContent = 'Transcribing...';
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      chunks = [];
+
+      try {
+        const result = await puter.ai.speech2txt(blob);
+        const text = result.text || result;
+        transcriptDiv.textContent = text || '(No text returned)';
+        statusDiv.textContent = 'Done.';
+      } catch (err) {
+        console.error(err);
+        statusDiv.textContent = 'Transcription error: ' + err.message;
+      }
+    }
+
+    // PTT behavior: hold to record, release to stop
+    pttBtn.addEventListener('mousedown', async () => {
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add('recording');
+      statusDiv.textContent = 'Recording...';
+    });
+
+    pttBtn.addEventListener('mouseup', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+
+    // Also stop on mouse leaving the button while pressed
+    pttBtn.addEventListener('mouseleave', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+
+    // Basic touch support (mobile)
+    pttBtn.addEventListener('touchstart', async (e) => {
+      e.preventDefault();
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add('recording');
+      statusDiv.textContent = 'Recording...';
+    });
+
+    pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        pttBtn.classList.remove('recording');
+        statusDiv.textContent = 'Processing...';
+      }
+    });
+  </script>
+</body>
+</html>
