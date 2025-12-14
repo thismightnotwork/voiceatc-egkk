@@ -37,7 +37,7 @@
 </head>
 <body>
   <h1>ATC Push‑to‑Talk – AI Pilot Reply</h1>
-  <p>You speak as ATC (e.g. “Golf Oscar Lima Foxtrot, runway two seven cleared for takeoff…”). The AI understands it and replies as the pilot, then speaks the reply.</p>
+  <p>You speak as ATC. The AI replies as the pilot using CAP‑style RTF, with a fast template path and a slow LLM fallback.</p>
 
   <button id="ptt">Hold to Talk (ATC)</button>
   <div id="status"></div>
@@ -72,100 +72,314 @@
       }
     }
 
-    async function askPilotAI(atcText) {
-  const text = atcText.toLowerCase();
+    // ---------- FAST TEMPLATE ENGINE ----------
 
-  // --- 1. Extract callsign (very simple heuristic) ---
-  // Try patterns like "g-abcd", "speedbird 123", "easy 456", etc.
-  let callsign = "";
-  const gReg = text.match(/\bg-?[a-z]{3,4}\b/i);          // G-ABCD, GABCD
-  const airlineReg = text.match(/\b(speedbird|ryanair|easy|easyjet|british airways|wizzy|jet2)\s?\d{1,4}\b/i);
+    function buildPilotReplyFast(atcText) {
+      if (!atcText) return null;
+      const text = atcText.toLowerCase();
 
-  if (airlineReg) {
-    callsign = airlineReg[0];
-  } else if (gReg) {
-    callsign = gReg[0].replace(/\s+/g, "").toUpperCase();
-  } else {
-    // Fallback if we really don't know
-    callsign = "Golf Oscar Lima Foxtrot";
-  }
+      // --- Callsign extraction (simple heuristics) ---
+      let callsign = "";
+      const gReg = text.match(/\bg-?[a-z]{3,4}\b/i); // G-ABCD, GABCD
+      const airlineReg = text.match(/\b(speedbird|ryanair|easyjet|easy|jet2|wizzair|tui|loganair|aer lingus)\s?\d{1,4}\b/i);
 
-  // --- 2. Extract common slots ---
-  const runwayMatch = text.match(/\brunway\s+(\d{2}[LRC]?)\b/);
-  const runway = runwayMatch ? runwayMatch[1] : "";
+      if (airlineReg) {
+        callsign = airlineReg[0];
+      } else if (gReg) {
+        callsign = gReg[0].replace(/\s+/g, "").toUpperCase();
+      } else {
+        callsign = "Golf Oscar Lima Foxtrot";
+      }
 
-  const qnhMatch = text.match(/\bqnh\s+(\d{3,4})\b/);
-  const qnh = qnhMatch ? qnhMatch[1] : "";
+      // Normalise some spacing
+      callsign = callsign.replace(/\s{2,}/g, " ");
 
-  const levelMatch =
-    text.match(/\bflight level\s+(\d{2,3})\b/) ||
-    text.match(/\blevel\s+(\d{2,3})\b/) ||
-    text.match(/\baltitude\s+(\d{3,5})\b/);
-  const level = levelMatch ? levelMatch[1] : "";
+      // --- Slot extraction ---
+      const runwayMatch = text.match(/\brunway\s+(\d{2}[lrc]?)\b/);
+      const runway = runwayMatch ? runwayMatch[1] : "";
 
-  const headingMatch = text.match(/\bheading\s+(\d{2,3})\b/);
-  const heading = headingMatch ? heading[1] : "";
+      const qnhMatch = text.match(/\bqnh\s+(\d{3,4})\b/);
+      const qnh = qnhMatch ? qnhMatch[1] : "";
 
-  const squawkMatch = text.match(/\bsquawk\s+(\d{4})\b/);
-  const squawk = squawkMatch ? squawkMatch[1] : "";
+      const levelMatch =
+        text.match(/\bflight level\s+(\d{2,3})\b/) ||
+        text.match(/\bfl\s*(\d{2,3})\b/) ||
+        text.match(/\blevel\s+(\d{2,3})\b/) ||
+        text.match(/\baltitude\s+(\d{3,5})\b/) ||
+        text.match(/\bclimb(?:\s+to)?\s+(\d{3,5})\b/) ||
+        text.match(/\bdescend(?:\s+to)?\s+(\d{3,5})\b/);
+      const level = levelMatch ? levelMatch[1] : "";
 
-  // --- 3. Detect intent & build template reply ---
-  let reply = "";
+      const headingMatch = text.match(/\bheading\s+(\d{2,3})\b/);
+      const heading = headingMatch ? heading[1] : "";
 
-  if (text.includes("cleared for takeoff") || text.includes("cleared for departure")) {
-    reply = runway
-      ? `cleared for takeoff runway ${runway}, ${callsign}.`
-      : `cleared for takeoff, ${callsign}.`;
-  } else if (text.includes("line up") || text.includes("line-up")) {
-    reply = runway
-      ? `lining up runway ${runway}, ${callsign}.`
-      : `lining up, ${callsign}.`;
-  } else if (text.includes("taxi")) {
-    // Very simple taxi readback
-    reply = qnh
-      ? `taxi as cleared, qnh ${qnh}, ${callsign}.`
-      : `taxi as cleared, ${callsign}.`;
-  } else if (text.includes("climb") || text.includes("descend") || text.includes("descend to") || text.includes("descend altitude")) {
-    if (text.includes("climb")) {
-      reply = level
-        ? `climbing to ${level}, ${callsign}.`
-        : `climbing as cleared, ${callsign}.`;
-    } else {
-      reply = level
-        ? `descending to ${level}, ${callsign}.`
-        : `descending as cleared, ${callsign}.`;
+      const squawkMatch = text.match(/\bsquawk\s+(\d{4})\b/);
+      const squawk = squawkMatch ? squawkMatch[1] : "";
+
+      const speedMatch = text.match(/\b(?:speed|maintain speed|reduce speed to|increase speed to)\s+(\d{2,3})\b/);
+      const speed = speedMatch ? speedMatch[1] : "";
+
+      const freqMatch = text.match(/\b(\d{3}\.\d{1,3})\b/);
+      const freq = freqMatch ? freqMatch[1] : "";
+
+      const directMatch = text.match(/\bdirect\s+([a-z0-9]+)\b/);
+      const directFix = directMatch ? directMatch[1].toUpperCase() : "";
+
+      const holdFixMatch = text.match(/\bhold(?:ing)?\s+at\s+([a-z0-9]+)\b/);
+      const holdFix = holdFixMatch ? holdFixMatch[1].toUpperCase() : "";
+
+      const localiserMatch = text.match(/\blocaliser\b|\bloc(?:alizer)?\b/);
+      const ilsMatch = text.match(/\bils\b/);
+
+      let reply = "";
+
+      // ---------- DEPARTURE / LINE-UP / TAKE-OFF ----------
+      if (text.includes("cleared for takeoff") || text.includes("cleared for departure")) {
+        reply = runway
+          ? `cleared for takeoff runway ${runway}, ${callsign}.`
+          : `cleared for takeoff, ${callsign}.`;
+
+      } else if (text.includes("line up and wait") || text.includes("line up") || text.includes("line-up")) {
+        reply = runway
+          ? `lining up runway ${runway}, ${callsign}.`
+          : `lining up, ${callsign}.`;
+
+      } else if (text.includes("backtrack")) {
+        reply = runway
+          ? `backtracking runway ${runway}, ${callsign}.`
+          : `backtracking, ${callsign}.`;
+
+      // ---------- ARRIVAL / APPROACH / LANDING ----------
+      } else if (text.includes("cleared to land")) {
+        reply = runway
+          ? `cleared to land runway ${runway}, ${callsign}.`
+          : `cleared to land, ${callsign}.`;
+
+      } else if (text.includes("continue approach")) {
+        reply = `continuing approach, ${callsign}.`;
+
+      } else if (text.includes("join base") || text.includes("join final") || text.includes("join downwind")) {
+        if (text.includes("base")) {
+          reply = `joining base leg, ${callsign}.`;
+        } else if (text.includes("downwind")) {
+          reply = `joining downwind, ${callsign}.`;
+        } else {
+          reply = `joining final, ${callsign}.`;
+        }
+
+      } else if (text.includes("go around") || text.includes("go-around")) {
+        if (heading && level) {
+          reply = `going around, heading ${heading}, ${level}, ${callsign}.`;
+        } else if (heading) {
+          reply = `going around, heading ${heading}, ${callsign}.`;
+        } else {
+          reply = `going around, ${callsign}.`;
+        }
+
+      } else if (ilsMatch || localiserMatch) {
+        reply = runway
+          ? `established on the localiser runway ${runway}, ${callsign}.`
+          : `established on the localiser, ${callsign}.`;
+
+      // ---------- TAXI / GROUND ----------
+      } else if (text.includes("taxi")) {
+        if (text.includes("hold short") || text.includes("hold at") || text.includes("hold before")) {
+          reply = runway
+            ? `taxiing as cleared, holding short runway ${runway}, ${callsign}.`
+            : `taxiing as cleared, holding short, ${callsign}.`;
+        } else {
+          reply = qnh
+            ? `taxi as cleared, qnh ${qnh} set, ${callsign}.`
+            : `taxi as cleared, ${callsign}.`;
+        }
+
+      } else if (text.includes("vacate") || text.includes("exit runway")) {
+        reply = runway
+          ? `vacating runway ${runway}, ${callsign}.`
+          : `vacating runway, ${callsign}.`;
+
+      } else if (text.includes("cross runway")) {
+        reply = runway
+          ? `crossing runway ${runway}, ${callsign}.`
+          : `crossing runway, ${callsign}.`;
+
+      // ---------- CLIMB / DESCENT / LEVEL ----------
+      } else if (text.includes("climb") || text.includes("descend")) {
+        if (text.includes("climb")) {
+          reply = level
+            ? `climbing to ${level}, ${callsign}.`
+            : `climbing as cleared, ${callsign}.`;
+        } else {
+          reply = level
+            ? `descending to ${level}, ${callsign}.`
+            : `descending as cleared, ${callsign}.`;
+        }
+
+      } else if (text.includes("maintain") && (text.includes("flight level") || text.includes("altitude"))) {
+        reply = level
+          ? `maintaining ${level}, ${callsign}.`
+          : `maintaining as cleared, ${callsign}.`;
+
+      } else if (text.includes("level off") || text.includes("stop climb") || text.includes("stop descent")) {
+        reply = `stopping climb / descent as instructed, ${callsign}.`;
+
+      // ---------- HEADING / VECTORS ----------
+      } else if (text.includes("turn left") || text.includes("turn right") || text.includes("heading")) {
+        reply = heading
+          ? `turning heading ${heading}, ${callsign}.`
+          : `turning as instructed, ${callsign}.`;
+
+      } else if (text.includes("fly direct") || text.includes("proceed direct") || text.includes("direct")) {
+        reply = directFix
+          ? `proceeding direct ${directFix}, ${callsign}.`
+          : `proceeding as instructed, ${callsign}.`;
+
+      // ---------- SPEED CONTROL ----------
+      } else if (text.includes("reduce speed") || text.includes("increase speed") || text.includes("maintain speed") || text.includes("not above") || text.includes("not less than")) {
+        reply = speed
+          ? `speed ${speed} knots, ${callsign}.`
+          : `speed as instructed, ${callsign}.`;
+
+      // ---------- HOLDING / HOLDS ----------
+      } else if (text.includes("hold") && (text.includes("pattern") || text.includes("holding"))) {
+        if (holdFix) {
+          reply = `holding at ${holdFix} as instructed, ${callsign}.`;
+        } else {
+          reply = `holding as instructed, ${callsign}.`;
+        }
+
+      // ---------- QNH / ALTIMETER ----------
+      } else if (text.includes("qnh")) {
+        reply = qnh
+          ? `qnh ${qnh} set, ${callsign}.`
+          : `qnh set, ${callsign}.`;
+
+      } else if (text.includes("qfe")) {
+        const qfeMatch = text.match(/\bqfe\s+(\d{3,4})\b/);
+        const qfe = qfeMatch ? qfeMatch[1] : "";
+        reply = qfe
+          ? `qfe ${qfe} set, ${callsign}.`
+          : `qfe set, ${callsign}.`;
+
+      // ---------- SQUAWK / TRANSPONDER ----------
+      } else if (text.includes("squawk") || text.includes("transponder")) {
+        if (text.includes("ident") || text.includes("identification")) {
+          reply = `squawk ident, ${callsign}.`;
+        } else {
+          reply = squawk
+            ? `squawking ${squawk}, ${callsign}.`
+            : `squawking as assigned, ${callsign}.`;
+        }
+
+      } else if (text.includes("stop squawk") || text.includes("squawk standby")) {
+        reply = `transponder standby, ${callsign}.`;
+
+      // ---------- FREQUENCY CHANGE / HAND-OFF ----------
+      } else if (text.includes("contact") || text.includes("monitor") || text.includes("change to")) {
+        reply = freq
+          ? `changing to ${freq}, ${callsign}.`
+          : `changing frequency, ${callsign}.`;
+
+      // ---------- POSITION / TRAFFIC / CIRCUIT ----------
+      } else if (text.includes("report final") || text.includes("report downwind") || text.includes("report base") || text.includes("report overhead")) {
+        if (text.includes("final")) {
+          reply = `will report final, ${callsign}.`;
+        } else if (text.includes("downwind")) {
+          reply = `will report downwind, ${callsign}.`;
+        } else if (text.includes("base")) {
+          reply = `will report base, ${callsign}.`;
+        } else if (text.includes("overhead")) {
+          reply = `will report overhead, ${callsign}.`;
+        } else {
+          reply = `wilco, ${callsign}.`;
+        }
+
+      } else if (text.includes("report ready")) {
+        reply = `will report ready, ${callsign}.`;
+
+      } else if (text.includes("traffic")) {
+        if (text.includes("in sight")) {
+          reply = `traffic in sight, ${callsign}.`;
+        } else if (text.includes("not in sight") || text.includes("no visual")) {
+          reply = `negative contact, ${callsign}.`;
+        } else {
+          reply = `looking out, ${callsign}.`;
+        }
+
+      // ---------- MISC GENERAL ACKS ----------
+      } else if (text.includes("hold position")) {
+        reply = `holding position, ${callsign}.`;
+
+      } else if (text.includes("hold short")) {
+        reply = runway
+          ? `holding short runway ${runway}, ${callsign}.`
+          : `holding short, ${callsign}.`;
+
+      } else if (text.includes("standby")) {
+        reply = `standing by, ${callsign}.`;
+
+      } else if (text.includes("readback correct") || text.includes("correct")) {
+        reply = `roger, ${callsign}.`;
+
+      } else if (text.includes("say again")) {
+        reply = `say again, ${callsign}.`;
+
+      } else if (text.includes("confirm")) {
+        reply = `affirm, ${callsign}.`;
+      }
+
+      // If nothing matched, return null -> triggers slow LLM path
+      if (!reply) return null;
+      return reply;
     }
-  } else if (text.includes("heading")) {
-    reply = heading
-      ? `turning heading ${heading}, ${callsign}.`
-      : `turning as instructed, ${callsign}.`;
-  } else if (text.includes("qnh")) {
-    reply = qnh
-      ? `qnh ${qnh} set, ${callsign}.`
-      : `qnh set, ${callsign}.`;
-  } else if (text.includes("squawk")) {
-    reply = squawk
-      ? `squawking ${squawk}, ${callsign}.`
-      : `squawking as assigned, ${callsign}.`;
-  } else if (text.includes("contact") || text.includes("frequency")) {
-    reply = `changing frequency, ${callsign}.`;
-  } else if (text.includes("report") && text.includes("ready") || text.includes("ready for departure")) {
-    reply = `wilco, ${callsign}.`;
-  } else {
-    // Fallback generic readback
-    reply = `roger, ${callsign}.`;
-  }
 
-  return reply;
-}
+    // ---------- SLOW-PATH LLM FALLBACK ----------
+
+    async function askPilotAI(atcText) {
+      const fast = buildPilotReplyFast(atcText);
+      if (fast) return fast;
+
+      const systemPrompt =
+        "You are the pilot in a UK CAA CAP 413 style RTF exchange.\n" +
+        "You receive ATC transmissions as text and must reply with ONE short, realistic pilot readback.\n" +
+        "Rules:\n" +
+        "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
+        "- If the call sign is an airline flight (e.g. BAW123), use the correct telephony designator " +
+        "instead of spelling letters: BAW = 'Speedbird', AFR = 'Airfrans', KLM = 'KLM', etc.\n" +
+        "- If ATC or the pilot already use a telephony designator like 'Speedbird', keep using that; " +
+        "do NOT convert it to the NATO alphabet.\n" +
+        "- For UK G- registrations, you may use the NATO alphabet (e.g. G-ABCD → 'Golf Alpha Bravo Charlie Delta').\n" +
+        "- Put the clearance or readback FIRST and the call sign LAST. Example: " +
+        "'cleared for takeoff runway two seven, Speedbird one two three.'\n" +
+        "- Be concise: read back only what is required.\n" +
+        "- Output ONLY the pilot’s spoken transmission, no explanations.";
+
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "ATC transmission: \"" + atcText + "\"" }
+      ];
+
+      const resp = await puter.ai.chat(messages, {
+        model: "gpt-5-nano",
+        stream: false
+      });
+
+      if (typeof resp === "string") return resp;
+      if (resp?.message?.content) return resp.message.content;
+      if (resp?.choices?.[0]?.message?.content) return resp.choices[0].message.content;
+      return "say again, please.";
+    }
+
+    // ---------- TTS WRAPPER ----------
 
     async function speak(text) {
-      // Free TTS through Puter; provider can be default or openai/polly per docs
       const audio = await puter.ai.txt2speech(text, {
         language: "en-GB"
       });
       await audio.play();
     }
+
+    // ---------- RECORD / PROCESS LOOP ----------
 
     async function onStopRecording() {
       statusDiv.textContent = "Transcribing...";
@@ -185,7 +399,7 @@
           return;
         }
 
-        statusDiv.textContent = "Asking AI to generate pilot reply...";
+        statusDiv.textContent = "Generating pilot reply...";
         const pilotText = await askPilotAI(atcText);
         pilotDiv.textContent = pilotText;
 
@@ -198,7 +412,8 @@
       }
     }
 
-    // PTT handlers
+    // ---------- PTT HANDLERS ----------
+
     pttBtn.addEventListener("mousedown", async () => {
       await initMedia();
       if (!mediaRecorder) return;
@@ -246,5 +461,3 @@
   </script>
 </body>
 </html>
-
-
