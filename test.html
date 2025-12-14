@@ -56,7 +56,7 @@
 </head>
 <body>
   <h1>ATC Push‑to‑Talk – AI Pilot Reply</h1>
-  <p>You speak as ATC. The AI replies as the pilot using UK CAP‑style RTF, with a fast template path and a slow LLM fallback.</p>
+  <p>You speak as ATC. The AI replies as the pilot using UK CAP‑style RTF, with a fast local template path and a slow LLM fallback.</p>
 
   <button id="ptt">Hold to Talk (ATC)</button>
   <div id="status"></div>
@@ -72,15 +72,15 @@
 
   <div id="examples">
     <h2>Example ATC phrases you can say</h2>
-    <p>These are examples of things you can speak; the AI will generate a matching pilot readback in 1–3 seconds.</p>
+    <p>These are examples of things you can speak; the AI will generate a matching pilot readback quickly.</p>
     <code>“Golf Oscar Lima Foxtrot, runway two six left cleared for takeoff, surface wind two seven zero degrees one zero knots.”</code>
     <small>Pilot reply: “cleared for takeoff runway two six left, Golf Oscar Lima Foxtrot.”</small>
 
     <code>“Speedbird one two three, line up and wait runway zero nine right.”</code>
     <small>Pilot reply: “lining up runway zero nine right, Speedbird one two three.”</small>
 
-    <code>“Golf Oscar Lima Foxtrot, descend to altitude two thousand feet, QNH one zero one three.”</code>
-    <small>Pilot reply: “descending to two thousand, QNH one zero one three set, Golf Oscar Lima Foxtrot.”</small>
+    <code>“Golf Tango Echo Sierra Tango, descend to altitude two thousand feet, QNH one zero one three.”</code>
+    <small>Pilot reply: “descending to two thousand, QNH one zero one three set, Golf Tango Echo Sierra Tango.”</small>
 
     <code>“Speedbird one two three, turn left heading one eight zero, reduce speed to one six zero knots.”</code>
     <small>Pilot reply: “turning heading one eight zero, speed one six zero knots, Speedbird one two three.”</small>
@@ -90,6 +90,9 @@
 
     <code>“Golf Oscar Lima Foxtrot, squawk seven thousand.”</code>
     <small>Pilot reply: “squawking seven thousand, Golf Oscar Lima Foxtrot.”</small>
+
+    <code>“EZY four five, cleared LAM three X-ray departure runway two seven right.”</code>
+    <small>Pilot reply: “cleared LAM three X-ray departure runway two seven right, Easy four five.”</small>
 
     <code>“Speedbird one two three, contact London Control one two seven decimal eight two five.”</code>
     <small>Pilot reply: “changing to one two seven decimal eight two five, Speedbird one two three.”</small>
@@ -118,21 +121,21 @@
 
     // ---------- PHONETIC / NUMBER HELPERS ----------
 
-    // ICAO number pronunciation: 3→tree, 5→fife, 9→niner etc.[web:118][web:120]
+    // ICAO-style number pronunciation (simplified digit-by-digit).[web:118]
     function spellNumberDigits(numStr) {
       const map = {
         "0": "zero",
         "1": "one",
         "2": "two",
-        "3": "three",  // ICAO “tree”
-        "4": "four",   // ICAO “fow-er”
-        "5": "five",   // ICAO “fife”
+        "3": "three",
+        "4": "four",
+        "5": "five",
         "6": "six",
         "7": "seven",
         "8": "eight",
-        "9": "nine"    // ICAO often “niner”
+        "9": "nine"
       };
-      return numStr.split("").map(d => map[d] || d).join(" ");
+      return (numStr || "").split("").map(d => map[d] || d).join(" ");
     }
 
     // Convert "26L" -> "two six left", "09R" -> "zero nine right".[web:95][web:102]
@@ -153,10 +156,9 @@
       return `${digitWords}${side}`;
     }
 
-    // Spell a UK G‑registration using the NATO phonetic alphabet (letters only).[web:116][web:119]
-    function speakGReg(ureg) {
-      if (!ureg) return "";
-      const cleaned = ureg.toUpperCase().replace(/^G-?/, "");
+    // NATO phonetic for arbitrary registration/tail (GA + custom).[web:115][web:116]
+    function speakTailPhonetic(raw) {
+      if (!raw) return "";
       const map = {
         A: "Alpha", B: "Bravo", C: "Charlie", D: "Delta", E: "Echo",
         F: "Foxtrot", G: "Golf", H: "Hotel", I: "India", J: "Juliett",
@@ -164,52 +166,72 @@
         P: "Papa", Q: "Quebec", R: "Romeo", S: "Sierra", T: "Tango",
         U: "Uniform", V: "Victor", W: "Whiskey", X: "Xray", Y: "Yankee", Z: "Zulu"
       };
-      const letters = cleaned.split("").map(ch => map[ch] || ch).join(" ");
-      return `Golf ${letters}`;
+      // Keep first nationality letter, drop optional dash; speak rest as phonetics / digits.[web:143][web:137]
+      const cleaned = raw.toUpperCase().replace(/^[A-Z]-?/, match => match[0]);
+      return cleaned.split("").map(ch => map[ch] || spellNumberDigits(ch)).join(" ");
     }
 
-    // Very simple airline telephony mapping (you can expand this).
+    // Airline telephony + number (generic) and GA tails.[web:135][web:139]
     function normaliseCallsign(raw) {
       if (!raw) return "Golf Oscar Lima Foxtrot";
       const t = raw.toUpperCase().trim();
-      // Airline telephony examples.[web:122]
-      if (t.startsWith("SPEEDBIRD")) return t.replace("SPEEDBIRD", "Speedbird").replace(/\s+/, " ");
-      if (t.startsWith("RYANAIR")) return t.replace("RYANAIR", "Ryanair").replace(/\s+/, " ");
-      if (t.startsWith("EASYJET") || t.startsWith("EASY ")) return t.replace(/EASY(JET)?/,"Easy").replace(/\s+/, " ");
-      if (t.startsWith("JET2")) return t.replace("JET2", "Jet two").replace(/\s+/, " ");
-      if (t.startsWith("TUI")) return t.replace("TUI", "TUI").replace(/\s+/, " ");
-      if (t.startsWith("LOGANAIR")) return t.replace("LOGANAIR", "Loganair").replace(/\s+/, " ");
-      if (t.startsWith("AER LINGUS")) return t.replace("AER LINGUS", "Shamrock").replace(/\s+/, " ");
-      if (t.startsWith("BRITISH AIRWAYS") || t.startsWith("BAW")) return t.replace(/BRITISH AIRWAYS|BAW/,"Speedbird").replace(/\s+/, " ");
 
-      // G‑reg: spell with NATO alphabet.
-      if (t.startsWith("G")) {
-        return speakGReg(t);
+      // If it looks like "BAW123" or "EZY 45A".
+      const airlinePattern = /^([A-Z]{2,8})\s?(\d{1,4}[A-Z]?)$/;
+      const m = t.match(airlinePattern);
+      if (m) {
+        const telephony = m[1];
+        const numberPart = m[2];
+        const spokenNumber = spellNumberDigits(numberPart.replace(/[A-Z]$/, match => " " + match));
+        // Common ICAO operator codes → telephony words.[web:134][web:139]
+        const telephonyMap = {
+          BAW: "Speedbird",
+          EZY: "Easy",
+          RYR: "Ryanair",
+          KLM: "KLM",
+          AFR: "Airfrans",
+          DLH: "Lufthansa",
+          VLG: "Vueling",
+          WZZ: "Wizz Air",
+          TUI: "TUI"
+        };
+        const spokenTelephony = telephonyMap[telephony] || telephony;
+        return `${spokenTelephony} ${spokenNumber}`;
       }
-      return t;
+
+      // If controller already used telephony word, keep it.[web:135]
+      if (t.startsWith("SPEEDBIRD")) return t.replace("SPEEDBIRD", "Speedbird");
+      if (t.startsWith("RYANAIR")) return t.replace("RYANAIR", "Ryanair");
+      if (t.startsWith("EASYJET") || t.startsWith("EASY ")) return t.replace(/EASY(JET)?/, "Easy");
+      if (t.startsWith("JET2")) return t.replace("JET2", "Jet two");
+      if (t.startsWith("TUI")) return t.replace("TUI", "TUI");
+      if (t.startsWith("LOGANAIR")) return t.replace("LOGANAIR", "Loganair");
+
+      // Otherwise treat as GA / tail number.
+      return speakTailPhonetic(t);
     }
 
-    // ---------- FAST TEMPLATE ENGINE ----------
+    // ---------- FAST TEMPLATE ENGINE (IFR + VFR) ----------
 
     function buildPilotReplyFast(atcText) {
       if (!atcText) return null;
       const text = atcText.toLowerCase();
 
-      // --- Callsign extraction ---
-      let callsign = "";
-      const gReg = text.match(/\bg-?[a-z]{3,4}\b/i); // G-ABCD, GABCD
-      const airlineReg = text.match(/\b(speedbird|ryanair|easyjet|easy|jet2|wizzair|tui|loganair|aer lingus|british airways|klm|air france)\s?\d{1,4}\b/i);
+      // Callsign extraction: airline or GA / custom tail.[web:137]
+      let callsignRaw = "";
+      const airlineReg = text.match(/\b([a-z]{2,8})\s?\d{1,4}[a-z]?\b/i);
+      const tailReg = text.match(/\b[a-z]{1,2}-?[a-z0-9]{3,5}\b/i);
 
       if (airlineReg) {
-        callsign = airlineReg[0];
-      } else if (gReg) {
-        callsign = gReg[0];
+        callsignRaw = airlineReg[0];
+      } else if (tailReg) {
+        callsignRaw = tailReg[0];
       } else {
-        callsign = "Golf Oscar Lima Foxtrot";
+        callsignRaw = "G-OLF";
       }
-      callsign = normaliseCallsign(callsign);
+      const callsign = normaliseCallsign(callsignRaw);
 
-      // --- Slot extraction ---
+      // Slot extraction.
       const runwayMatch = text.match(/\brunway\s+(\d{2}[lrc]?)\b/);
       const runway = runwayMatch ? runwayMatch[1] : "";
       const speakableRunway = speakRunway(runway);
@@ -264,7 +286,7 @@
 
       let reply = "";
 
-      // ---------- DEPARTURE / LINE-UP / TAKE-OFF ----------
+      // DEPARTURE / LINE-UP / TAKEOFF (IFR+VFR)
       if (text.includes("cleared for takeoff") || text.includes("cleared for departure")) {
         reply = runway
           ? `cleared for takeoff runway ${speakableRunway}, ${callsign}.`
@@ -286,11 +308,9 @@
           : `cleared ${sidName} departure, ${callsign}.`;
 
       } else if (text.includes("after departure")) {
-        reply = runway
-          ? `after departure as cleared, ${callsign}.`
-          : `after departure as cleared, ${callsign}.`;
+        reply = `after departure as cleared, ${callsign}.`;
 
-      // ---------- ARRIVAL / APPROACH / LANDING ----------
+      // ARRIVAL / APPROACH / LANDING (IFR+VFR)
       } else if (text.includes("cleared to land")) {
         reply = runway
           ? `cleared to land runway ${speakableRunway}, ${callsign}.`
@@ -307,11 +327,13 @@
       } else if (starName && text.includes("cleared")) {
         reply = `cleared ${starName} arrival, ${callsign}.`;
 
-      } else if (text.includes("join base") || text.includes("join final") || text.includes("join downwind")) {
+      } else if (text.includes("join base") || text.includes("join final") || text.includes("join downwind") || text.includes("join overhead")) {
         if (text.includes("base")) {
           reply = `joining base leg, ${callsign}.`;
         } else if (text.includes("downwind")) {
           reply = `joining downwind, ${callsign}.`;
+        } else if (text.includes("overhead")) {
+          reply = `joining overhead, ${callsign}.`;
         } else {
           reply = `joining final, ${callsign}.`;
         }
@@ -330,7 +352,7 @@
           ? `established on the localiser runway ${speakableRunway}, ${callsign}.`
           : `established on the localiser, ${callsign}.`;
 
-      // ---------- TAXI / GROUND ----------
+      // TAXI / GROUND
       } else if (text.includes("taxi")) {
         if (text.includes("hold short") || text.includes("hold at") || text.includes("hold before")) {
           reply = runway
@@ -352,7 +374,7 @@
           ? `crossing runway ${speakableRunway}, ${callsign}.`
           : `crossing runway, ${callsign}.`;
 
-      // ---------- CLIMB / DESCENT / LEVEL ----------
+      // CLIMB / DESCENT / LEVEL
       } else if (text.includes("climb") || text.includes("descend")) {
         if (text.includes("climb")) {
           reply = levelSpoken
@@ -372,7 +394,7 @@
       } else if (text.includes("level off") || text.includes("stop climb") || text.includes("stop descent")) {
         reply = `stopping climb or descent as instructed, ${callsign}.`;
 
-      // ---------- HEADING / VECTORS ----------
+      // HEADING / VECTORS
       } else if (text.includes("turn left") || text.includes("turn right") || text.includes("heading")) {
         reply = headingSpoken
           ? `turning heading ${headingSpoken}, ${callsign}.`
@@ -383,13 +405,13 @@
           ? `proceeding direct ${directFix}, ${callsign}.`
           : `proceeding as instructed, ${callsign}.`;
 
-      // ---------- SPEED ----------
+      // SPEED
       } else if (text.includes("reduce speed") || text.includes("increase speed") || text.includes("maintain speed") || text.includes("not above") || text.includes("not less than")) {
         reply = speedSpoken
           ? `speed ${speedSpoken} knots, ${callsign}.`
           : `speed as instructed, ${callsign}.`;
 
-      // ---------- HOLDING ----------
+      // HOLDING
       } else if (text.includes("hold") && (text.includes("pattern") || text.includes("holding"))) {
         if (holdFix) {
           reply = `holding at ${holdFix} as instructed, ${callsign}.`;
@@ -397,7 +419,7 @@
           reply = `holding as instructed, ${callsign}.`;
         }
 
-      // ---------- QNH / QFE ----------
+      // QNH / QFE
       } else if (text.includes("qnh")) {
         reply = qnh
           ? `QNH ${spellNumberDigits(qnh)} set, ${callsign}.`
@@ -410,14 +432,14 @@
           ? `QFE ${spellNumberDigits(qfe)} set, ${callsign}.`
           : `QFE set, ${callsign}.`;
 
-      // ---------- SQUAWK ----------
+      // SQUAWK / CONSPICUITY
       } else if (text.includes("squawk") || text.includes("transponder")) {
         if (text.includes("ident") || text.includes("identification")) {
           reply = `squawk ident, ${callsign}.`;
-        } else if (squawk7000 || squawk2000) {
-          reply = squawk7000
-            ? `squawking seven thousand, ${callsign}.`
-            : `squawking two thousand, ${callsign}.`;
+        } else if (squawk7000 || text.includes("vfr conspicuity")) { // VFR conspicuity.[web:131]
+          reply = `squawking conspicuity, ${callsign}.`;
+        } else if (squawk2000 || text.includes("ifr conspicuity")) { // IFR conspicuity.[web:131]
+          reply = `squawking conspicuity, ${callsign}.`;
         } else {
           reply = squawkSpoken
             ? `squawking ${squawkSpoken}, ${callsign}.`
@@ -427,13 +449,13 @@
       } else if (text.includes("stop squawk") || text.includes("squawk standby")) {
         reply = `transponder standby, ${callsign}.`;
 
-      // ---------- FREQUENCY / HAND-OFF ----------
+      // FREQUENCY / HAND-OFF
       } else if (text.includes("contact") || text.includes("monitor") || text.includes("change to")) {
         reply = freqSpoken
           ? `changing to ${freqSpoken}, ${callsign}.`
           : `changing frequency, ${callsign}.`;
 
-      // ---------- POSITION / TRAFFIC / CIRCUIT ----------
+      // POSITION / TRAFFIC / CIRCUIT
       } else if (text.includes("report final") || text.includes("report downwind") || text.includes("report base") || text.includes("report overhead")) {
         if (text.includes("final")) {
           reply = `will report final, ${callsign}.`;
@@ -459,7 +481,7 @@
           reply = `looking out, ${callsign}.`;
         }
 
-      // ---------- MISC / ACKS ----------
+      // MISC / ACKS
       } else if (text.includes("hold position")) {
         reply = `holding position, ${callsign}.`;
 
@@ -497,7 +519,7 @@
         "Rules:\n" +
         "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
         "- Use correct telephony designators for airline callsigns when applicable.\n" +
-        "- For UK G- registrations, you may use the NATO phonetic alphabet.\n" +
+        "- For GA registrations, you may use the NATO phonetic alphabet.\n" +
         "- Put the clearance or readback FIRST and the call sign LAST.\n" +
         "- Be concise: read back only what is required.\n" +
         "- Output ONLY the pilot’s spoken transmission, no explanations.";
