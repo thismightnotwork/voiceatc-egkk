@@ -1,0 +1,58 @@
+{
+  "TAKEOFF_CLEARANCE": [
+    "cleared for takeoff runway {runway_spoken}, {callsign_spoken}.",
+    "takeoff approved runway {runway_spoken}, {callsign_spoken}."
+  ],
+  "LINE_UP": [
+    "lining up runway {runway_spoken}, {callsign_spoken}.",
+    "entering and lining up runway {runway_spoken}, {callsign_spoken}."
+  ],
+  "LANDING_CLEARANCE": [
+    "cleared to land runway {runway_spoken}, {callsign_spoken}.",
+    "landing runway {runway_spoken}, {callsign_spoken}."
+  ],
+  "TAXI_CLEARANCE": [
+    "taxi as cleared, {callsign_spoken}.",
+    "taxiing as instructed, {callsign_spoken}."
+  ],
+  "CLIMB_TO_LEVEL": [
+    "climbing to {level_spoken}, {callsign_spoken}.",
+    "climbing as cleared to {level_spoken}, {callsign_spoken}."
+  ],
+  "DESCEND_TO_LEVEL": [
+    "descending to {level_spoken}, {callsign_spoken}.",
+    "descending as cleared to {level_spoken}, {callsign_spoken}."
+  ],
+  "MAINTAIN_LEVEL": [
+    "maintaining {level_spoken}, {callsign_spoken}.",
+    "maintaining present level, {callsign_spoken}."
+  ],
+  "VECTOR_HEADING": [
+    "turning heading {heading_spoken}, {callsign_spoken}.",
+    "heading {heading_spoken}, {callsign_spoken}."
+  ],
+  "SQUAWK_ASSIGN": [
+    "squawking {squawk_spoken}, {callsign_spoken}.",
+    "code set {squawk_spoken}, {callsign_spoken}."
+  ],
+  "SQUAWK_CONSPICUITY": [
+    "squawking conspicuity, {callsign_spoken}.",
+    "conspicuity code set, {callsign_spoken}."
+  ],
+  "FREQ_CHANGE": [
+    "changing to {freq_spoken}, {callsign_spoken}.",
+    "switching to {freq_spoken}, {callsign_spoken}."
+  ],
+  "REPORT_POSITION_DOWNWIND": [
+    "will report downwind, {callsign_spoken}.",
+    "downwind report when established, {callsign_spoken}."
+  ],
+  "REPORT_POSITION_FINAL": [
+    "will report final, {callsign_spoken}.",
+    "final report as requested, {callsign_spoken}."
+  ],
+  "REPORT_POSITION_BASE": [
+    "will report base, {callsign_spoken}.",
+    "base leg report as requested, {callsign_spoken}."
+  ]
+}
