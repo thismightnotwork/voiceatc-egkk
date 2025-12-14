@@ -6,18 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#020617" />
 
-  <!-- PWA basics (single file) -->
-  <link rel="manifest" href="data:application/manifest+json,{
-    &quot;name&quot;:%22ATC%20Trainer%22,
-    &quot;short_name&quot;:%22ATC%22,
-    &quot;start_url&quot;:%22./index.html%22,
-    &quot;display&quot;:%22standalone%22,
-    &quot;background_color&quot;:%22#020617%22,
-    &quot;theme_color&quot;:%22#020617%22
-  }">
+  <!-- Minimal inline manifest-style info for PWA installs -->
   <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAADklEQVR4Ae3BAQ0AAADCoPdPbQ43oAAAAABJRU5ErkJggg==" />
 
-  <!-- Load Puter.js first so `puter` exists for the app code -->
+  <!-- Puter.js SDK -->
   <script src="https://js.puter.com/v2/"></script>
 
   <style>
@@ -164,6 +156,7 @@
       line-height: 1.5;
       color: var(--text-main);
       min-height: 80px;
+      white-space: pre-wrap;
     }
     .transcript.placeholder {
       color: var(--text-muted);
@@ -226,7 +219,6 @@
         0 20px 40px rgba(127,29,29,0.9),
         0 0 0 1px rgba(248,113,113,0.9);
     }
-    .latency { font-variant-numeric: tabular-nums; }
     footer {
       margin-top: 8px;
       font-size: 11px;
@@ -256,7 +248,7 @@
           <div class="brand-text-sub">Voice · STT · AI · TTS</div>
         </div>
       </div>
-      <div class="pill">Install to Home Screen for best iOS experience</div>
+      <div class="pill">Add to Home Screen on iOS</div>
     </header>
 
     <main>
@@ -270,12 +262,12 @@
           </div>
         </div>
         <div id="you" class="transcript placeholder">
-          Hold the button and speak, for example:<br>
-          “Speedbird one two three, runway two seven cleared for takeoff.”
+          Hold the button and speak, for example:
+          “Golf Oscar Lima Foxtrot, runway two seven cleared for takeoff.”
         </div>
         <div class="meta-row">
-          <span>Last STT latency: <strong class="latency" id="stt-latency">–</strong></span>
-          <span>AI + TTS: <strong class="latency" id="ai-latency">–</strong></span>
+          <span>Last STT: <strong id="stt-latency">–</strong></span>
+          <span>AI + TTS: <strong id="ai-latency">–</strong></span>
         </div>
         <div class="ptt-wrapper">
           <button id="ptt" class="ptt" type="button">
@@ -288,36 +280,24 @@
       <!-- Right: Pilot (AI) -->
       <section class="card">
         <div class="card-header">
-          <div class="card-title">Pilot Readback (AI)</div>
+          <div class="card-title">Pilot (AI)</div>
         </div>
         <div id="pilot" class="transcript placeholder">
-          Pilot replies will appear here and will be spoken automatically.
+          Pilot AI replies will appear here and will be spoken automatically.
         </div>
       </section>
     </main>
 
     <footer>
       <span>Powered by Puter.js STT · AI · TTS</span>
-      <span>Optimised for Safari / iOS PWA</span>
+      <span>Single-page, PWA-friendly UI</span>
     </footer>
   </div>
 
   <script>
-    // Wait until Puter.js has attached `puter` to window
-    async function waitForPuter(timeoutMs = 5000) {
-      const start = performance.now();
-      while (!window.puter) {
-        if (performance.now() - start > timeoutMs) {
-          throw new Error("Puter.js did not initialise (puter is undefined).");
-        }
-        await new Promise(r => setTimeout(r, 50));
-      }
-      return window.puter;
-    }
-
     const pttBtn = document.getElementById('ptt');
-    const statusPill = document.getElementById('status-pill');
     const statusLabel = document.getElementById('status-label');
+    const statusPill = document.getElementById('status-pill');
     const youDiv = document.getElementById('you');
     const pilotDiv = document.getElementById('pilot');
     const sttLatencySpan = document.getElementById('stt-latency');
@@ -337,31 +317,29 @@
       if (mediaRecorder) return;
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder = new MediaRecorder(stream);
         mediaRecorder.ondataavailable = e => {
           if (e.data && e.data.size > 0) chunks.push(e.data);
         };
         mediaRecorder.onstop = onStopRecording;
       } catch (err) {
-        setStatus('error', 'Mic blocked');
-        youDiv.textContent = 'Microphone permission denied or unavailable.';
+        setStatus('error', 'Mic error');
+        youDiv.textContent = 'Mic error: ' + err.message;
         youDiv.classList.remove('placeholder');
       }
     }
 
     async function askPilotAI(atcText) {
-      const puter = await waitForPuter();
       const systemPrompt =
         "You are the pilot in a UK CAA CAP 413 style RTF exchange. " +
-        "You receive ATC transmissions as text and must reply with ONE short, realistic pilot readback.\n" +
+        "You receive ATC transmissions as text. " +
+        "Your job is to produce a SINGLE, realistic pilot readback. " +
         "Rules:\n" +
         "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
-        "- If the call sign is an airline flight (e.g. BAW123), use the correct telephony designator instead of spelling letters: BAW = 'Speedbird', AFR = 'Airfrans', KLM = 'KLM', EZY = 'Easy', RYR = 'Ryanair', etc.\n" +
-        "- If ATC already uses a telephony designator like 'Speedbird', keep using that; do NOT convert it to NATO alphabet.\n" +
-        "- For UK G- registrations (G-XXXX), you may use the NATO alphabet (e.g. 'Golf Alpha Bravo Charlie Delta').\n" +
-        "- Put the clearance or readback FIRST and the call sign LAST. Example: 'cleared for takeoff runway two seven, Speedbird one two three.'\n" +
+        "- Identify the aircraft once per transmission using its callsign in the NATO phonetic alphabet.\n" +
+        "- Put the clearance or readback FIRST, and the callsign LAST. Example: 'cleared for takeoff runway two seven, Golf Oscar Lima Foxtrot.'\n" +
         "- Be concise: only read back what is required (clearances, runway, level, QNH, squawk etc.).\n" +
-        "- Output ONLY the pilot’s spoken transmission, no explanations.";
+        "- Do NOT include any explanations or extra text, only the pilot’s spoken transmission.";
 
       const messages = [
         { role: "system", content: systemPrompt },
@@ -369,35 +347,43 @@
       ];
 
       const t0 = performance.now();
-      const resp = await puter.ai.chat(messages, { model: "gpt-5-nano", stream: false });
+      const resp = await puter.ai.chat(messages, {
+        model: "gpt-5-nano",
+        stream: false
+      });
       const t1 = performance.now();
       aiLatencySpan.textContent = ((t1 - t0) / 1000).toFixed(2) + "s";
 
-      if (typeof resp === "string") return resp.trim();
-      if (resp?.message?.content) return (resp.message.content || "").trim();
-      if (resp?.choices?.[0]?.message?.content) return (resp.choices[0].message.content || "").trim();
+      if (typeof resp === "string") return resp;
+      if (resp?.message?.content) return resp.message.content;
+      if (resp?.choices?.[0]?.message?.content) return resp.choices[0].message.content;
+
       return "say again, please.";
     }
 
     async function speak(text) {
-      const puter = await waitForPuter();
+      const t0 = performance.now();
       const audio = await puter.ai.txt2speech(text, { language: "en-GB" });
       await audio.play();
+      const t1 = performance.now();
+      // Fold TTS time into AI latency display if you like, or leave as-is
+      const current = parseFloat(aiLatencySpan.textContent) || 0;
+      aiLatencySpan.textContent = (current + (t1 - t0) / 1000).toFixed(2) + "s";
     }
 
     async function onStopRecording() {
-      setStatus('idle', 'Processing');
-      const blob = new Blob(chunks, { type: 'audio/webm' });
+      statusLabel.textContent = "Transcribing...";
+      statusPill.classList.remove('listening');
+      const blob = new Blob(chunks, { type: "audio/webm" });
       chunks = [];
-      try {
-        const puter = await waitForPuter();
 
+      try {
         const sttStart = performance.now();
         const result = await puter.ai.speech2txt(blob);
-        const atcText = (result.text || result || "").trim();
         const sttEnd = performance.now();
         sttLatencySpan.textContent = ((sttEnd - sttStart) / 1000).toFixed(2) + "s";
 
+        const atcText = result.text || result || "";
         youDiv.textContent = atcText || "(No speech recognised)";
         youDiv.classList.remove('placeholder');
 
@@ -406,57 +392,72 @@
           pilotDiv.textContent = fallback;
           pilotDiv.classList.remove('placeholder');
           await speak(fallback);
-          setStatus('idle', 'Idle');
+          statusLabel.textContent = "Ready";
           return;
         }
 
-        setStatus('idle', 'AI reply');
+        statusLabel.textContent = "AI generating reply...";
         const pilotText = await askPilotAI(atcText);
         pilotDiv.textContent = pilotText;
         pilotDiv.classList.remove('placeholder');
 
-        setStatus('idle', 'Speaking');
+        statusLabel.textContent = "Speaking...";
         await speak(pilotText);
-        setStatus('idle', 'Idle');
+        statusLabel.textContent = "Ready";
       } catch (err) {
         console.error(err);
-        setStatus('error', 'Error');
+        statusLabel.textContent = "Error";
+        statusPill.classList.add('error');
       }
     }
 
-    function startRecording() {
+    // PTT handlers – same logic as your basic version
+    pttBtn.addEventListener("mousedown", async () => {
+      await initMedia();
       if (!mediaRecorder) return;
-      if (mediaRecorder.state === 'recording') return;
       chunks = [];
       mediaRecorder.start();
-      setStatus('listening', 'Listening');
-      pttBtn.classList.add('recording');
-    }
-
-    function stopRecording() {
-      if (!mediaRecorder) return;
-      if (mediaRecorder.state !== 'recording') return;
-      mediaRecorder.stop();
-      pttBtn.classList.remove('recording');
-    }
-
-    // PTT events (mouse + touch for iOS)
-    pttBtn.addEventListener('mousedown', async () => {
-      await initMedia();
-      startRecording();
+      pttBtn.classList.add("recording");
+      setStatus('listening', 'Recording ATC...');
     });
-    pttBtn.addEventListener('mouseup', () => stopRecording());
-    pttBtn.addEventListener('mouseleave', () => stopRecording());
 
-    pttBtn.addEventListener('touchstart', async (e) => {
+    pttBtn.addEventListener("mouseup", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusLabel.textContent = "Processing...";
+        statusPill.classList.remove('listening');
+      }
+    });
+
+    pttBtn.addEventListener("mouseleave", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusLabel.textContent = "Processing...";
+        statusPill.classList.remove('listening');
+      }
+    });
+
+    // Touch support for iOS
+    pttBtn.addEventListener("touchstart", async (e) => {
       e.preventDefault();
       await initMedia();
-      startRecording();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add("recording");
+      setStatus('listening', 'Recording ATC...');
     }, { passive: false });
 
-    pttBtn.addEventListener('touchend', (e) => {
+    pttBtn.addEventListener("touchend", (e) => {
       e.preventDefault();
-      stopRecording();
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusLabel.textContent = "Processing...";
+        statusPill.classList.remove('listening');
+      }
     }, { passive: false });
   </script>
 </body>
