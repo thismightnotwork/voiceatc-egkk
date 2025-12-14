@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ATC Trainer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#020617" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --bg-elevated: #020617;
+      --surface: #020617;
+      --primary: #38bdf8;
+      --primary-soft: rgba(56,189,248,0.12);
+      --danger: #f97373;
+      --border-subtle: rgba(148,163,184,0.35);
+      --text-main: #e5e7eb;
+      --text-muted: #9ca3af;
+      --accent: #38bdf8;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --radius-full: 999px;
+      --shadow-soft: 0 18px 40px rgba(15,23,42,0.8);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #0f172a, #020617);
+      color: var(--text-main);
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+    }
+    .app-shell {
+      width: 100%;
+      max-width: 960px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      border-radius: var(--radius-lg);
+      background: radial-gradient(circle at top left, rgba(56,189,248,0.22), rgba(15,23,42,0.95));
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(20px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-mark {
+      width: 32px;
+      height: 32px;
+      border-radius: 12px;
+      background: conic-gradient(from 210deg, #38bdf8, #22c55e, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #0f172a;
+      font-size: 16px;
+      font-weight: 700;
+      box-shadow: 0 0 0 2px rgba(15,23,42,0.9);
+    }
+    .brand-text-title {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .brand-text-sub {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-muted);
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2.2fr);
+      gap: 16px;
+    }
+    @media (max-width: 780px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+    .card {
+      background: rgba(15,23,42,0.92);
+      border-radius: var(--radius-lg);
+      border: 1px solid rgba(148,163,184,0.35);
+      box-shadow: var(--shadow-soft);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .card-title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-muted);
+    }
+    .status-pill {
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      border: 1px solid rgba(148,163,184,0.4);
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #4ade80;
+    }
+    .status-pill.error .status-dot { background: var(--danger); }
+    .status-pill.listening {
+      border-color: rgba(56,189,248,0.85);
+      color: var(--primary);
+    }
+    .status-pill.listening .status-dot {
+      background: var(--primary);
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.9); opacity: 0.7; }
+      50% { transform: scale(1.2); opacity: 1; }
+      100% { transform: scale(0.9); opacity: 0.7; }
+    }
+    .transcript {
+      flex: 1;
+      border-radius: var(--radius-md);
+      background: radial-gradient(circle at top left, rgba(56,189,248,0.08), rgba(15,23,42,0.95));
+      border: 1px solid rgba(148,163,184,0.4);
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-main);
+      min-height: 80px;
+    }
+    .transcript.placeholder {
+      color: var(--text-muted);
+      font-style: italic;
+    }
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .meta-row span strong {
+      color: var(--text-main);
+      font-weight: 500;
+    }
+    .ptt-wrapper {
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+    }
+    .ptt {
+      -webkit-appearance: none;
+      appearance: none;
+      border: none;
+      outline: none;
+      cursor: pointer;
+      width: 140px;
+      height: 140px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 30% 10%, #38bdf8, #0f172a);
+      color: #e5e7eb;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      box-shadow:
+        0 18px 30px rgba(15,23,42,0.9),
+        0 0 0 1px rgba(148,163,184,0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.12s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .ptt-label-main { font-size: 12px; }
+    .ptt-label-sub {
+      font-size: 10px;
+      opacity: 0.8;
+    }
+    .ptt:active {
+      transform: translateY(2px) scale(0.98);
+      box-shadow:
+        0 10px 18px rgba(8,14,28,0.95),
+        0 0 0 1px rgba(56,189,248,0.7);
+    }
+    .ptt.recording {
+      background: radial-gradient(circle at 30% 10%, #ef4444, #0f172a);
+      box-shadow:
+        0 20px 40px rgba(127,29,29,0.9),
+        0 0 0 1px rgba(248,113,113,0.9);
+    }
+    .latency {
+      font-variant-numeric: tabular-nums;
+    }
+    footer {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .pill {
+      border-radius: var(--radius-full);
+      padding: 3px 10px;
+      border: 1px solid rgba(148,163,184,0.4);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">ATC</div>
+        <div>
+          <div class="brand-text-title">ATC Trainer</div>
+          <div class="brand-text-sub">Voice · STT · AI · TTS</div>
+        </div>
+      </div>
+      <div class="pill">Install to Home Screen for best iOS experience</div>
+    </header>
+
+    <main>
+      <!-- Left: Control + ATC (you) -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">ATC Transmission (You)</div>
+          <div id="status-pill" class="status-pill">
+            <span class="status-dot"></span>
+            <span id="status-label">Idle</span>
+          </div>
+        </div>
+        <div id="you" class="transcript placeholder">
+          Hold the button and speak, for example:<br>
+          “Speedbird one two three, runway two seven cleared for takeoff.”
+        </div>
+        <div class="meta-row">
+          <span>Last STT latency: <strong class="latency" id="stt-latency">–</strong></span>
+          <span>AI + TTS: <strong class="latency" id="ai-latency">–</strong></span>
+        </div>
+        <div class="ptt-wrapper">
+          <button id="ptt" class="ptt" type="button">
+            <span class="ptt-label-main">Push to Talk</span>
+            <span class="ptt-label-sub">Hold while speaking</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right: Pilot (AI) -->
+      <section class="card">
+        <div class="card-header">
+          <div class="card-title">Pilot Readback (AI)</div>
+        </div>
+        <div id="pilot" class="transcript placeholder">
+          Pilot replies will appear here and will be spoken automatically.
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>Powered by Puter.js STT · AI · TTS</span>
+      <span>Optimised for Safari / iOS PWA</span>
+    </footer>
+  </div>
+
+  <script>
+    // PWA service worker registration (simple app-shell cache)
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+
+    const pttBtn = document.getElementById('ptt');
+    const statusPill = document.getElementById('status-pill');
+    const statusLabel = document.getElementById('status-label');
+    const youDiv = document.getElementById('you');
+    const pilotDiv = document.getElementById('pilot');
+    const sttLatencySpan = document.getElementById('stt-latency');
+    const aiLatencySpan = document.getElementById('ai-latency');
+
+    let mediaRecorder;
+    let chunks = [];
+    let recordingStart = 0;
+
+    function setStatus(mode, text) {
+      statusLabel.textContent = text;
+      statusPill.classList.remove('error', 'listening');
+      if (mode === 'listening') statusPill.classList.add('listening');
+      if (mode === 'error') statusPill.classList.add('error');
+    }
+
+    async function initMedia() {
+      if (mediaRecorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+        mediaRecorder.ondataavailable = e => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+        mediaRecorder.onstop = onStopRecording;
+      } catch (err) {
+        setStatus('error', 'Mic blocked');
+        youDiv.textContent = 'Microphone permission denied or unavailable.';
+        youDiv.classList.remove('placeholder');
+      }
+    }
+
+    async function askPilotAI(atcText) {
+      const systemPrompt =
+        "You are the pilot in a UK CAA CAP 413 style RTF exchange. " +
+        "You receive ATC transmissions as text and must reply with ONE short, realistic pilot readback.\n" +
+        "Rules:\n" +
+        "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
+        "- If the call sign is an airline flight (e.g. BAW123), use the correct telephony designator instead of spelling letters: BAW = 'Speedbird', AFR = 'Airfrans', KLM = 'KLM', EZY = 'Easy', RYR = 'Ryanair', etc.\n" +
+        "- If ATC already uses a telephony designator like 'Speedbird', keep using that; do NOT convert it to NATO alphabet.\n" +
+        "- For UK G- registrations (G-XXXX), you may use the NATO alphabet (e.g. 'Golf Alpha Bravo Charlie Delta').\n" +
+        "- Put the clearance or readback FIRST and the call sign LAST. Example: 'cleared for takeoff runway two seven, Speedbird one two three.'\n" +
+        "- Be concise: only read back what is required (clearances, runway, level, QNH, squawk etc.).\n" +
+        "- Output ONLY the pilot’s spoken transmission, no explanations.";
+
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "ATC transmission: \"" + atcText + "\"" }
+      ];
+
+      const t0 = performance.now();
+      const resp = await puter.ai.chat(messages, {
+        model: "gpt-5-nano",
+        stream: false
+      });
+      const t1 = performance.now();
+      aiLatencySpan.textContent = ((t1 - t0) / 1000).toFixed(2) + "s";
+
+      if (typeof resp === "string") return resp.trim();
+      if (resp?.message?.content) return (resp.message.content || "").trim();
+      if (resp?.choices?.[0]?.message?.content) return (resp.choices[0].message.content || "").trim();
+      return "say again, please.";
+    }
+
+    async function speak(text) {
+      const audio = await puter.ai.txt2speech(text, {
+        language: "en-GB"
+      });
+      await audio.play();
+    }
+
+    async function onStopRecording() {
+      setStatus('idle', 'Processing');
+      const blob = new Blob(chunks, { type: 'audio/webm' });
+      chunks = [];
+      const sttStart = performance.now();
+
+      try {
+        const result = await puter.ai.speech2txt(blob);
+        const atcText = (result.text || result || "").trim();
+        const sttEnd = performance.now();
+        sttLatencySpan.textContent = ((sttEnd - sttStart) / 1000).toFixed(2) + "s";
+
+        youDiv.textContent = atcText || "(No speech recognised)";
+        youDiv.classList.remove('placeholder');
+
+        if (!atcText) {
+          const fallback = "no transmission received, say again.";
+          pilotDiv.textContent = fallback;
+          pilotDiv.classList.remove('placeholder');
+          await speak(fallback);
+          setStatus('idle', 'Idle');
+          return;
+        }
+
+        setStatus('idle', 'AI reply');
+        const pilotText = await askPilotAI(atcText);
+        pilotDiv.textContent = pilotText;
+        pilotDiv.classList.remove('placeholder');
+
+        setStatus('idle', 'Speaking');
+        await speak(pilotText);
+        setStatus('idle', 'Idle');
+      } catch (err) {
+        console.error(err);
+        setStatus('error', 'Error');
+      }
+    }
+
+    function startRecording() {
+      if (!mediaRecorder) return;
+      if (mediaRecorder.state === 'recording') return;
+      chunks = [];
+      mediaRecorder.start();
+      recordingStart = performance.now();
+      setStatus('listening', 'Listening');
+      pttBtn.classList.add('recording');
+    }
+
+    function stopRecording() {
+      if (!mediaRecorder) return;
+      if (mediaRecorder.state !== 'recording') return;
+      mediaRecorder.stop();
+      pttBtn.classList.remove('recording');
+    }
+
+    // PTT events – designed to work on iOS (touch + mouse)
+    pttBtn.addEventListener('mousedown', async () => {
+      await initMedia();
+      startRecording();
+    });
+    pttBtn.addEventListener('mouseup', () => stopRecording());
+    pttBtn.addEventListener('mouseleave', () => stopRecording());
+
+    pttBtn.addEventListener('touchstart', async (e) => {
+      e.preventDefault();
+      await initMedia();
+      startRecording();
+    }, { passive: false });
+
+    pttBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      stopRecording();
+    }, { passive: false });
+  </script>
+</body>
+</html>
