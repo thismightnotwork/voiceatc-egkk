@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ATC STT → AI → TTS (Puter.js)</title>
+  <script src="https://js.puter.com/v2/"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1.5rem; max-width: 1000px; margin: auto; }
+    h1 { font-size: 1.5rem; }
+    #ptt {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      border: 1px solid #666;
+      background: #eee;
+    }
+    #ptt.recording {
+      background: #d9534f;
+      color: white;
+      border-color: #b52b27;
+    }
+    #status { margin-top: 0.5rem; color: #555; }
+    #labels { margin-top: 1rem; display: flex; gap: 1rem; font-weight: 600; }
+    #labels span { flex: 1; }
+    #panels { display: flex; gap: 1rem; }
+    #panels > div {
+      flex: 1;
+      white-space: pre-wrap;
+      margin-top: 0.25rem;
+      padding: 0.75rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      min-height: 3rem;
+    }
+    #examples {
+      margin-top: 1.5rem;
+      padding: 1rem;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      background: #fafafa;
+      font-size: 0.95rem;
+    }
+    #examples h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+    }
+    #examples code {
+      display: block;
+      padding: 0.25rem 0.5rem;
+      margin: 0.25rem 0;
+      background: #f0f0f0;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h1>ATC Push‑to‑Talk – AI Pilot Reply</h1>
+  <p>You speak as ATC. The AI replies as the pilot using UK CAP‑style phraseology, with a fast local template path and a slow LLM fallback.</p>
+
+  <button id="ptt">Hold to Talk (ATC)</button>
+  <div id="status"></div>
+
+  <div id="labels">
+    <span>ATC (you)</span>
+    <span>Pilot (AI)</span>
+  </div>
+  <div id="panels">
+    <div id="you"></div>
+    <div id="pilot"></div>
+  </div>
+
+  <div id="examples">
+    <h2>Example ATC phrases you can say</h2>
+    <p>These are examples of things you can speak; the AI will generate a matching pilot readback quickly.</p>
+    <code>“Golf Oscar Lima Foxtrot, runway two six left cleared for takeoff, surface wind two seven zero degrees one zero knots.”</code>
+    <small>Pilot reply: “cleared for takeoff runway two six left, Golf Oscar Lima Foxtrot.”</small>
+
+    <code>“Speedbird one two three, line up and wait runway zero nine right.”</code>
+    <small>Pilot reply: “lining up runway zero nine right, Speedbird one two three.”</small>
+
+    <code>“Golf Tango Echo Sierra Tango, descend to altitude two thousand feet, QNH one zero one three.”</code>
+    <small>Pilot reply: “descending to two thousand, QNH one zero one three set, Golf Tango Echo Sierra Tango.”</small>
+
+    <code>“Speedbird one two three, turn left heading one eight zero, reduce speed to one six zero knots.”</code>
+    <small>Pilot reply: “turning heading one eight zero, speed one six zero knots, Speedbird one two three.”</small>
+
+    <code>“Golf Oscar Lima Foxtrot, report downwind runway two six left.”</code>
+    <small>Pilot reply: “will report downwind, Golf Oscar Lima Foxtrot.”</small>
+
+    <code>“Golf Oscar Lima Foxtrot, squawk seven thousand.”</code>
+    <small>Pilot reply: “squawking seven thousand, Golf Oscar Lima Foxtrot.”</small>
+
+    <code>“EZY four five, cleared LAM three X-ray departure runway two seven right.”</code>
+    <small>Pilot reply: “cleared LAM three X-ray departure runway two seven right, Easy four five.”</small>
+
+    <code>“Speedbird one two three, contact London Control one two seven decimal eight two five.”</code>
+    <small>Pilot reply: “changing to one two seven decimal eight two five, Speedbird one two three.”</small>
+  </div>
+
+  <script>
+    const pttBtn = document.getElementById('ptt');
+    const statusDiv = document.getElementById('status');
+    const youDiv = document.getElementById('you');
+    const pilotDiv = document.getElementById('pilot');
+
+    let mediaRecorder;
+    let chunks = [];
+
+    // ------------ CONFIG: external JSON on GitHub ------------
+    let phraseDB = {};
+    const PHRASE_DB_URL = 'https://raw.githubusercontent.com/thismightnotwork/voiceatc-egkk/refs/heads/main/caa_phrase_db.json'; // change user/repo/path
+
+    async function loadPhraseDB() {
+      try {
+        const resp = await fetch(PHRASE_DB_URL);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        phraseDB = await resp.json();
+      } catch (e) {
+        console.error('Error loading phrase DB:', e);
+        phraseDB = {};
+      }
+    }
+    loadPhraseDB(); // fire and forget at startup
+
+    async function initMedia() {
+      if (mediaRecorder) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+        mediaRecorder.onstop = onStopRecording;
+      } catch (err) {
+        statusDiv.textContent = 'Mic error: ' + err.message;
+      }
+    }
+
+    // ---------- PHONETIC / NUMBER HELPERS ----------
+
+    function spellNumberDigits(numStr) {
+      const map = {
+        "0": "zero",
+        "1": "one",
+        "2": "two",
+        "3": "three",
+        "4": "four",
+        "5": "five",
+        "6": "six",
+        "7": "seven",
+        "8": "eight",
+        "9": "nine"
+      };
+      return (numStr || "").split("").map(d => map[d] || d).join(" ");
+    }
+
+    function speakRunway(designator) {
+      if (!designator) return "";
+      const numPart = designator.match(/\d{2}/);
+      const letterPart = designator.match(/[lrc]/i);
+      if (!numPart) return designator;
+
+      const digitWords = spellNumberDigits(numPart[0]);
+      let side = "";
+      if (letterPart) {
+        const l = letterPart[0].toLowerCase();
+        if (l === "l") side = " left";
+        else if (l === "r") side = " right";
+        else if (l === "c") side = " centre";
+      }
+      return `${digitWords}${side}`;
+    }
+
+    function speakTailPhonetic(raw) {
+      if (!raw) return "";
+      const map = {
+        A: "Alpha", B: "Bravo", C: "Charlie", D: "Delta", E: "Echo",
+        F: "Foxtrot", G: "Golf", H: "Hotel", I: "India", J: "Juliett",
+        K: "Kilo", L: "Lima", M: "Mike", N: "November", O: "Oscar",
+        P: "Papa", Q: "Quebec", R: "Romeo", S: "Sierra", T: "Tango",
+        U: "Uniform", V: "Victor", W: "Whiskey", X: "Xray", Y: "Yankee", Z: "Zulu"
+      };
+      const cleaned = raw.toUpperCase().replace(/^[A-Z]-?/, match => match[0]);
+      return cleaned.split("").map(ch => map[ch] || spellNumberDigits(ch)).join(" ");
+    }
+
+    function normaliseCallsign(raw) {
+      if (!raw) return "Golf Oscar Lima Foxtrot";
+      const t = raw.toUpperCase().trim();
+
+      // Airline code + number (e.g. BAW123, EZY45A).
+      const airlinePattern = /^([A-Z]{2,8})\s?(\d{1,4}[A-Z]?)$/;
+      const m = t.match(airlinePattern);
+      if (m) {
+        const telephony = m[1];
+        const numberPart = m[2];
+        const spokenNumber = spellNumberDigits(numberPart.replace(/[A-Z]$/, match => " " + match));
+        const telephonyMap = {
+          BAW: "Speedbird",
+          EZY: "Easy",
+          RYR: "Ryanair",
+          KLM: "KLM",
+          AFR: "Airfrans",
+          DLH: "Lufthansa",
+          VLG: "Vueling",
+          WZZ: "Wizz Air",
+          TUI: "TUI"
+        };
+        const spokenTelephony = telephonyMap[telephony] || telephony;
+        return `${spokenTelephony} ${spokenNumber}`;
+      }
+
+      // Already a telephony word.
+      if (t.startsWith("SPEEDBIRD")) return t.replace("SPEEDBIRD", "Speedbird");
+      if (t.startsWith("RYANAIR")) return t.replace("RYANAIR", "Ryanair");
+      if (t.startsWith("EASYJET") || t.startsWith("EASY ")) return t.replace(/EASY(JET)?/, "Easy");
+      if (t.startsWith("JET2")) return t.replace("JET2", "Jet two");
+      if (t.startsWith("TUI")) return t.replace("TUI", "TUI");
+      if (t.startsWith("LOGANAIR")) return t.replace("LOGANAIR", "Loganair");
+
+      // Otherwise treat as GA / tail.
+      return speakTailPhonetic(t);
+    }
+
+    // ---------- INTENT + SLOT DETECTION ----------
+
+    function detectIntentAndSlots(atcText) {
+      const text = atcText.toLowerCase();
+
+      // Callsign
+      let callsignRaw = "";
+      const airlineReg = text.match(/\b([a-z]{2,8})\s?\d{1,4}[a-z]?\b/i);
+      const tailReg = text.match(/\b[a-z]{1,2}-?[a-z0-9]{3,5}\b/i);
+      if (airlineReg) callsignRaw = airlineReg[0];
+      else if (tailReg) callsignRaw = tailReg[0];
+      else callsignRaw = "G-OLF";
+      const callsign_spoken = normaliseCallsign(callsignRaw);
+
+      // Common slots
+      const runwayMatch = text.match(/\brunway\s+(\d{2}[lrc]?)\b/);
+      const runway = runwayMatch ? runwayMatch[1] : "";
+      const runway_spoken = speakRunway(runway);
+
+      const levelMatch =
+        text.match(/\bflight level\s+(\d{2,3})\b/) ||
+        text.match(/\bfl\s*(\d{2,3})\b/) ||
+        text.match(/\blevel\s+(\d{2,3})\b/) ||
+        text.match(/\baltitude\s+(\d{3,5})\b/) ||
+        text.match(/\bclimb(?:\s+to)?\s+(\d{3,5})\b/) ||
+        text.match(/\bdescend(?:\s+to)?\s+(\d{3,5})\b/);
+      const level_raw = levelMatch ? levelMatch[1] : "";
+      const level_spoken = level_raw ? spellNumberDigits(level_raw) : "";
+
+      const headingMatch = text.match(/\bheading\s+(\d{2,3})\b/);
+      const heading_raw = headingMatch ? headingMatch[1] : "";
+      const heading_spoken = heading_raw ? spellNumberDigits(heading_raw) : "";
+
+      const qnhMatch = text.match(/\bqnh\s+(\d{3,4})\b/);
+      const qnh_raw = qnhMatch ? qnhMatch[1] : "";
+      const qnh_spoken = qnh_raw ? spellNumberDigits(qnh_raw) : "";
+
+      const squawkMatch = text.match(/\bsquawk\s+(\d{4})\b/);
+      const squawk_raw = squawkMatch ? squawkMatch[1] : "";
+      const squawk_spoken = squawk_raw ? squawk_raw.split("").map(d => spellNumberDigits(d)).join(" ") : "";
+
+      const freqMatch = text.match(/\b(\d{3}\.\d{1,3})\b/);
+      const freq_raw = freqMatch ? freqMatch[1] : "";
+      const freq_spoken = freq_raw
+        ? freq_raw.replace(".", " decimal ").split(/\s*decimal\s*/).map(part => spellNumberDigits(part)).join(" decimal ")
+        : "";
+
+      const squawk7000 = text.includes("7000");
+      const squawk2000 = text.includes("2000");
+
+      let intentId = null;
+
+      if (text.includes("cleared for takeoff") || text.includes("cleared for departure")) {
+        intentId = "TAKEOFF_CLEARANCE";
+      } else if (text.includes("line up and wait") || text.includes("line up") || text.includes("line-up")) {
+        intentId = "LINE_UP";
+      } else if (text.includes("cleared to land") || text.includes("land at your discretion")) {
+        intentId = "LANDING_CLEARANCE";
+      } else if (text.includes("taxi")) {
+        intentId = "TAXI_CLEARANCE";
+      } else if (text.includes("climb")) {
+        intentId = "CLIMB_TO_LEVEL";
+      } else if (text.includes("descend")) {
+        intentId = "DESCEND_TO_LEVEL";
+      } else if (text.includes("maintain") && (text.includes("flight level") || text.includes("altitude"))) {
+        intentId = "MAINTAIN_LEVEL";
+      } else if (text.includes("heading") || text.includes("turn left") || text.includes("turn right")) {
+        intentId = "VECTOR_HEADING";
+      } else if (text.includes("squawk") || text.includes("transponder")) {
+        if (squawk7000 || text.includes("vfr conspicuity") || squawk2000 || text.includes("ifr conspicuity")) {
+          intentId = "SQUAWK_CONSPICUITY";
+        } else {
+          intentId = "SQUAWK_ASSIGN";
+        }
+      } else if (text.includes("contact") || text.includes("monitor") || text.includes("change to")) {
+        intentId = "FREQ_CHANGE";
+      } else if (text.includes("report downwind")) {
+        intentId = "REPORT_POSITION_DOWNWIND";
+      } else if (text.includes("report final")) {
+        intentId = "REPORT_POSITION_FINAL";
+      } else if (text.includes("report base")) {
+        intentId = "REPORT_POSITION_BASE";
+      }
+
+      const slots = {
+        callsign_spoken,
+        runway_spoken,
+        level_spoken,
+        heading_spoken,
+        qnh_spoken,
+        squawk_spoken,
+        freq_spoken
+      };
+
+      return { intentId, slots };
+    }
+
+    function realiseFromDB(intentId, slots) {
+      const templates = phraseDB[intentId];
+      if (!templates || !templates.length) return null;
+      const template = templates[Math.floor(Math.random() * templates.length)];
+      return template.replace(/\{([a-z_]+)\}/g, (_, name) => slots[name] ?? "");
+    }
+
+    // ---------- FAST + SLOW PATH ----------
+
+    async function askPilotAI(atcText) {
+      const { intentId, slots } = detectIntentAndSlots(atcText);
+
+      if (intentId) {
+        const fastReply = realiseFromDB(intentId, slots);
+        if (fastReply && fastReply.trim()) return fastReply;
+      }
+
+      const systemPrompt =
+        "You are the pilot in a UK CAA CAP 413 style RTF exchange.\n" +
+        "You receive ATC transmissions as text and must reply with ONE short, realistic pilot readback.\n" +
+        "Rules:\n" +
+        "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
+        "- Use correct telephony designators for airline callsigns when applicable.\n" +
+        "- For GA registrations, you may use the NATO phonetic alphabet.\n" +
+        "- Put the clearance or readback FIRST and the call sign LAST.\n" +
+        "- Be concise: read back only what is required.\n" +
+        "- Output ONLY the pilot’s spoken transmission, no explanations.";
+
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: "ATC transmission: \"" + atcText + "\"" }
+      ];
+
+      const resp = await puter.ai.chat(messages, {
+        model: "gpt-5-nano",
+        stream: false
+      });
+
+      if (typeof resp === "string") return resp;
+      if (resp?.message?.content) return resp.message.content;
+      if (resp?.choices?.[0]?.message?.content) return resp.choices[0].message.content;
+      return "say again, please.";
+    }
+
+    // ---------- TTS + RECORD LOOP ----------
+
+    async function speak(text) {
+      const audio = await puter.ai.txt2speech(text, {
+        language: "en-GB"
+      });
+      await audio.play();
+    }
+
+    async function onStopRecording() {
+      statusDiv.textContent = "Transcribing...";
+      const blob = new Blob(chunks, { type: "audio/webm" });
+      chunks = [];
+
+      try {
+        const result = await puter.ai.speech2txt(blob);
+        const atcText = result.text || result || "";
+        youDiv.textContent = atcText || "(No speech recognised)";
+
+        if (!atcText) {
+          const fallback = "no transmission received, say again.";
+          pilotDiv.textContent = fallback;
+          await speak(fallback);
+          statusDiv.textContent = "Ready.";
+          return;
+        }
+
+        statusDiv.textContent = "Generating pilot reply...";
+        const pilotText = await askPilotAI(atcText);
+        pilotDiv.textContent = pilotText;
+
+        statusDiv.textContent = "Speaking pilot reply...";
+        await speak(pilotText);
+        statusDiv.textContent = "Ready.";
+      } catch (err) {
+        console.error(err);
+        statusDiv.textContent = "Error: " + err.message;
+      }
+    }
+
+    // ---------- PTT HANDLERS ----------
+
+    pttBtn.addEventListener("mousedown", async () => {
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add("recording");
+      statusDiv.textContent = "Recording ATC...";
+    });
+
+    pttBtn.addEventListener("mouseup", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
+      }
+    });
+
+    pttBtn.addEventListener("mouseleave", () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
+      }
+    });
+
+    pttBtn.addEventListener("touchstart", async (e) => {
+      e.preventDefault();
+      await initMedia();
+      if (!mediaRecorder) return;
+      chunks = [];
+      mediaRecorder.start();
+      pttBtn.classList.add("recording");
+      statusDiv.textContent = "Recording ATC...";
+    });
+
+    pttBtn.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        pttBtn.classList.remove("recording");
+        statusDiv.textContent = "Processing...";
+      }
+    });
+  </script>
+</body>
+</html>
