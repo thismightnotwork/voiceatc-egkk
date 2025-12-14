@@ -73,36 +73,91 @@
     }
 
     async function askPilotAI(atcText) {
-      const systemPrompt =
-        "You are the pilot in a UK CAA CAP 413 style RTF exchange.\n" +
-        "You receive ATC transmissions as text and must reply with ONE short, realistic pilot readback.\n" +
-        "Rules:\n" +
-        "- Use standard ICAO/CAA radiotelephony phraseology, UK style.\n" +
-        "- If the call sign is an airline flight (e.g. BAW123), use the correct telephony designator " +
-        "instead of spelling letters: BAW = 'Speedbird', AFR = 'Airfrans', KLM = 'KLM', etc.\n" +
-        "- If ATC or the pilot already use a telephony designator like 'Speedbird', keep using that; " +
-        "do NOT convert it to the NATO alphabet.\n" +
-        "- For UK G- registrations, you may use the NATO alphabet (e.g. G-ABCD → 'Golf Alpha Bravo Charlie Delta').\n" +
-        "- Put the clearance or readback FIRST and the call sign LAST. Example: " +
-        "'cleared for takeoff runway two seven, Speedbird one two three.'\n" +
-        "- Be concise: read back only what is required.\n" +
-        "- Output ONLY the pilot’s spoken transmission, no explanations.";
+  const text = atcText.toLowerCase();
 
-      const messages = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: "ATC transmission: \"" + atcText + "\"" }
-      ];
+  // --- 1. Extract callsign (very simple heuristic) ---
+  // Try patterns like "g-abcd", "speedbird 123", "easy 456", etc.
+  let callsign = "";
+  const gReg = text.match(/\bg-?[a-z]{3,4}\b/i);          // G-ABCD, GABCD
+  const airlineReg = text.match(/\b(speedbird|ryanair|easy|easyjet|british airways|wizzy|jet2)\s?\d{1,4}\b/i);
 
-      const resp = await puter.ai.chat(messages, {
-        model: "gpt-5-nano",
-        stream: false
-      });
+  if (airlineReg) {
+    callsign = airlineReg[0];
+  } else if (gReg) {
+    callsign = gReg[0].replace(/\s+/g, "").toUpperCase();
+  } else {
+    // Fallback if we really don't know
+    callsign = "Golf Oscar Lima Foxtrot";
+  }
 
-      if (typeof resp === "string") return resp;
-      if (resp?.message?.content) return resp.message.content;
-      if (resp?.choices?.[0]?.message?.content) return resp.choices[0].message.content;
-      return "say again, please.";
+  // --- 2. Extract common slots ---
+  const runwayMatch = text.match(/\brunway\s+(\d{2}[LRC]?)\b/);
+  const runway = runwayMatch ? runwayMatch[1] : "";
+
+  const qnhMatch = text.match(/\bqnh\s+(\d{3,4})\b/);
+  const qnh = qnhMatch ? qnhMatch[1] : "";
+
+  const levelMatch =
+    text.match(/\bflight level\s+(\d{2,3})\b/) ||
+    text.match(/\blevel\s+(\d{2,3})\b/) ||
+    text.match(/\baltitude\s+(\d{3,5})\b/);
+  const level = levelMatch ? levelMatch[1] : "";
+
+  const headingMatch = text.match(/\bheading\s+(\d{2,3})\b/);
+  const heading = headingMatch ? heading[1] : "";
+
+  const squawkMatch = text.match(/\bsquawk\s+(\d{4})\b/);
+  const squawk = squawkMatch ? squawkMatch[1] : "";
+
+  // --- 3. Detect intent & build template reply ---
+  let reply = "";
+
+  if (text.includes("cleared for takeoff") || text.includes("cleared for departure")) {
+    reply = runway
+      ? `cleared for takeoff runway ${runway}, ${callsign}.`
+      : `cleared for takeoff, ${callsign}.`;
+  } else if (text.includes("line up") || text.includes("line-up")) {
+    reply = runway
+      ? `lining up runway ${runway}, ${callsign}.`
+      : `lining up, ${callsign}.`;
+  } else if (text.includes("taxi")) {
+    // Very simple taxi readback
+    reply = qnh
+      ? `taxi as cleared, qnh ${qnh}, ${callsign}.`
+      : `taxi as cleared, ${callsign}.`;
+  } else if (text.includes("climb") || text.includes("descend") || text.includes("descend to") || text.includes("descend altitude")) {
+    if (text.includes("climb")) {
+      reply = level
+        ? `climbing to ${level}, ${callsign}.`
+        : `climbing as cleared, ${callsign}.`;
+    } else {
+      reply = level
+        ? `descending to ${level}, ${callsign}.`
+        : `descending as cleared, ${callsign}.`;
     }
+  } else if (text.includes("heading")) {
+    reply = heading
+      ? `turning heading ${heading}, ${callsign}.`
+      : `turning as instructed, ${callsign}.`;
+  } else if (text.includes("qnh")) {
+    reply = qnh
+      ? `qnh ${qnh} set, ${callsign}.`
+      : `qnh set, ${callsign}.`;
+  } else if (text.includes("squawk")) {
+    reply = squawk
+      ? `squawking ${squawk}, ${callsign}.`
+      : `squawking as assigned, ${callsign}.`;
+  } else if (text.includes("contact") || text.includes("frequency")) {
+    reply = `changing frequency, ${callsign}.`;
+  } else if (text.includes("report") && text.includes("ready") || text.includes("ready for departure")) {
+    reply = `wilco, ${callsign}.`;
+  } else {
+    // Fallback generic readback
+    reply = `roger, ${callsign}.`;
+  }
+
+  return reply;
+}
 
     async function speak(text) {
       // Free TTS through Puter; provider can be default or openai/polly per docs
@@ -191,4 +246,5 @@
   </script>
 </body>
 </html>
+
 
